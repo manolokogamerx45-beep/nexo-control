@@ -1,0 +1,13 @@
+# Archivos temporales de publicación
+.site-package/
+.sites-runtime/
+nexo-site*.tar.gz
+
+# Dependencias, secretos y archivos locales
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
