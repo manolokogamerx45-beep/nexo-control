@@ -1,6 +1,8 @@
-# Nexo · Centro de Control
+# JIDE NOVA CORE
 
-Interfaz web demostrativa para gestionar inventario, lotes, compras, movimientos y mermas en distribuidoras y talleres manufactureros.
+## Nexo · Centro de Control
+
+Interfaz web demostrativa de **JIDE NOVA CORE** para gestionar inventario, lotes, compras, movimientos y mermas en distribuidoras y talleres manufactureros.
 
 ## Ejecutar localmente
 
