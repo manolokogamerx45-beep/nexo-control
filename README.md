@@ -136,6 +136,12 @@ data/                    SQLite privado (excluido de Git)
 
 ## Despliegue
 
+### Aprobación de correos desde el administrador
+
+En **Mi perfil y usuarios → Usuarios → Aprobar un correo**, escribe el correo y elige su perfil. La aprobación queda guardada hasta que Google verifique esa identidad en su primer acceso. Puedes revocarla antes del registro. No se envían correos ni se crean contraseñas. Las cuentas ya registradas se administran en la lista de usuarios: selecciona **Activo** y **Guardar acceso**. Los registros con contraseña requieren revisión manual; una aprobación anticipada no verifica la propiedad de un correo.
+
+API exclusiva para administradores: `GET /api/v1/email-approvals`, `POST /api/v1/email-approvals` con `{ "email": "persona@example.com", "role": "consulta" }` y `DELETE /api/v1/email-approvals` con `{ "email": "persona@example.com" }`. Los cambios quedan auditados. Esta autorización interna no modifica la lista de usuarios de prueba de Google Cloud.
+
 Requiere **servidor Node.js con almacenamiento persistente**, HTTPS y variables de entorno. `NODE_ENV=production` exige un origen HTTPS. Con proxy inverso, usa `HOST=0.0.0.0` solo con acceso de red apropiado. Los límites de intentos usan la dirección del socket; detrás de un proxy el límite por IP será compartido. No se confía en cabeceras de IP arbitrarias.
 
 SQLite permite una sola instancia en esta etapa. Respalda su volumen privado; para múltiples réplicas y el inventario transaccional previsto, migra a PostgreSQL y almacenamiento compartido de sesiones y límites.

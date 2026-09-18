@@ -108,6 +108,7 @@ function createApp(config = {}) {
             user=db.prepare('SELECT * FROM users WHERE id=?').get(id);A.audit(db,id,id,'account.google.register');
           }
           if(user.status==='disabled')return redirect(res,'/?auth_error=account_disabled');
+          user=A.applyGoogleApproval(db,user);
           setSession(req,res,user.id);
           // Clear the transaction cookie as well as setting the new session.
           res.setHeader('Set-Cookie',[res.getHeader('Set-Cookie'),cookie(oauthCookie,'',0)]);
@@ -131,6 +132,21 @@ function createApp(config = {}) {
         db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);setSession(req,res,user.id);
         A.audit(db,user.id,user.id,'password.change');return json(res,200,{ok:true});
       }
+      if(route==='/api/v1/email-approvals') {
+        const actor=authenticate(req,true);if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
+        if(req.method==='GET')return json(res,200,{approvals:db.prepare('SELECT email,role,created_at FROM email_approvals ORDER BY created_at DESC').all()});
+        if(req.method==='POST' || req.method==='DELETE') {
+          const input=await body(req),email=A.validateEmail(input.email);
+          if(req.method==='POST') {
+            if(!A.ROLES.includes(input.role))A.bad('Perfil inválido.');
+            if(db.prepare('SELECT id FROM users WHERE email=?').get(email))A.bad('Este correo ya está registrado. Modifica su estado en la lista de usuarios.',409);
+            db.prepare('INSERT INTO email_approvals VALUES (?,?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role,approved_by=excluded.approved_by,created_at=excluded.created_at').run(email,input.role,actor.id,new Date().toISOString());
+          } else db.prepare('DELETE FROM email_approvals WHERE email=?').run(email);
+          A.audit(db,actor.id,null,req.method==='POST'?'access.email.approved':'access.email.revoked',{email});
+          return json(res,200,{ok:true});
+        }
+        A.bad('Método no permitido.',405);
+      }
       if(route==='/api/v1/users' || /^\/api\/v1\/users\/[^/]+$/.test(route)) {
         const actor=authenticate(req,true);if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
         if(route==='/api/v1/users' && req.method==='GET')return json(res,200,{users:db.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(A.publicUser)});
@@ -143,6 +159,7 @@ function createApp(config = {}) {
             if(target.role==='administrador'&&target.status==='active'&&(input.role!=='administrador'||input.status!=='active')&&db.prepare("SELECT count(*) AS n FROM users WHERE role='administrador' AND status='active'").get().n<=1)A.bad('Debes conservar al menos un administrador activo.',409);
             db.prepare('UPDATE users SET role=?,status=? WHERE id=?').run(input.role,input.status,id);
             db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
+            db.prepare('DELETE FROM email_approvals WHERE email=?').run(target.email);
             A.audit(db,actor.id,id,'access.update',{role:input.role,status:input.status});db.exec('COMMIT');
           }catch(error){db.exec('ROLLBACK');throw error;}
           return json(res,200,{user:A.publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id))});
