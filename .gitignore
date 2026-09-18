@@ -11,3 +11,10 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Identidades, sesiones y datos privados
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage/

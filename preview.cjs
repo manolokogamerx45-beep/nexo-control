@@ -1,1 +1,7 @@
-const http=require('http'),fs=require('fs'),path=require('path');const root=path.join(__dirname,'dist');http.createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;const file=path.join(root,pathname==='/'?'index.html':pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403);return res.end()}fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);return res.end('Not found')}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':file.endsWith('.js')?'text/javascript':'text/html; charset=utf-8');res.end(data)})}).listen(4173,'127.0.0.1',()=>console.log('http://127.0.0.1:4173'));
+// Compatibility entrypoint; npm start also loads .env.
+const { createApp } = require('./server.cjs');
+const port = Number(process.env.PORT || 4173);
+const { server } = createApp();
+server.listen(port, process.env.HOST || '127.0.0.1', () => {
+  console.log(`JIDE NOVA CORE: ${process.env.APP_ORIGIN || 'http://127.0.0.1:' + port}`);
+});

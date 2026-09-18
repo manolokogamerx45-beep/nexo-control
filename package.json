@@ -1,0 +1,14 @@
+{
+  "name": "jide-nova-core",
+  "version": "0.2.0",
+  "private": true,
+  "description": "JIDE NOVA CORE - Nexo inventory interface and authentication API",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.cjs",
+    "dev": "node --env-file-if-exists=.env --watch server.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "admin:create": "node --env-file-if-exists=.env scripts/create-admin.cjs"
+  },
+  "dependencies": { "google-auth-library": "^10.0.0" }
+}
