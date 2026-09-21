@@ -16,6 +16,49 @@ Aplicación de inventario con autenticación, perfiles y administración de usua
 
 El acceso con Google usa la API propia; no utiliza Firebase Authentication. Firestore proporciona el almacenamiento persistente.
 
+## Metodologías y arquitecturas
+
+La metodología define cómo se organiza el desarrollo; la arquitectura define cómo se distribuyen las responsabilidades del software.
+
+| Plataforma | Metodología acordada | Arquitectura | Estado |
+| --- | --- | --- | --- |
+| Web | Iterativa e incremental | Cliente-servidor organizada en capas de presentación, lógica de negocio y acceso a datos | Implementada para autenticación y administración de usuarios; inventario de demostración |
+| Móvil | Mobile-D | MVVM (Model–View–ViewModel), organizada por módulos | Planificada; la aplicación Flutter todavía no está implementada en este repositorio |
+
+### Web: desarrollo iterativo e incremental
+
+El trabajo se realiza por entregas funcionales: definir el alcance de una mejora, implementarla, ejecutar las comprobaciones correspondientes, revisar el resultado y corregirlo con la retroalimentación del usuario. Cada incremento se registra en Git. No se ha establecido un proceso formal de Scrum con sprints, roles y ceremonias.
+
+La arquitectura web separa estas responsabilidades:
+
+- **Presentación:** HTML, CSS y JavaScript en `dist/`; muestra las pantallas y consume la API.
+- **Lógica de negocio:** `server.cjs` y `lib/auth.cjs`; gestionan rutas HTTP, autenticación, sesiones, validaciones y permisos.
+- **Acceso a datos:** `lib/database.cjs`; encapsula las operaciones y transacciones sobre Cloud Firestore.
+
+Docker Compose define dos servicios, `web` (Nginx) y `auth-api` (Node.js). La lógica del backend está concentrada en una única API; separar la web y la API en contenedores no constituye todavía una arquitectura completa de microservicios de negocio.
+
+### Móvil: Mobile-D y MVVM
+
+Se adopta **Mobile-D** para organizar el desarrollo móvil en cinco fases. Su aplicación al proyecto está prevista de la siguiente manera:
+
+| Fase | Trabajo previsto en Nexo |
+| --- | --- |
+| Exploración | Definir usuarios, necesidades, alcance y prioridades de la aplicación móvil |
+| Inicialización | Preparar Flutter y Dart, la estructura MVVM, el entorno de pruebas y la conexión con la API |
+| Producción | Implementar y probar incrementos: acceso, inventario, almacenes y movimientos |
+| Estabilización | Integrar módulos, revisar contratos con la API y corregir problemas de funcionamiento |
+| Pruebas del sistema | Validar los flujos completos, permisos y comportamiento en dispositivos Android e iOS |
+
+La arquitectura móvil acordada es **MVVM por módulos**, con **Flutter y Dart**:
+
+- **View:** pantallas y componentes visuales que muestran el estado y reciben acciones del usuario.
+- **ViewModel:** estado de la pantalla, validaciones de presentación y coordinación de operaciones.
+- **Model y repositorios:** modelos de datos y acceso a la API de Node.js.
+
+La aplicación móvil consumirá el backend compartido, que seguirá aplicando los permisos y accediendo a Firestore. El acceso con Google requerirá configurar los clientes móviles y adaptar la validación y las sesiones del servidor; el flujo web existente no se considera una implementación móvil terminada. Las credenciales privadas de Firestore permanecerán en el servidor.
+
+Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. La persistencia del inventario y los endpoints de negocio necesarios para móvil siguen pendientes.
+
 ## Estado verificado del proyecto
 
 Al 21 de septiembre de 2026:
