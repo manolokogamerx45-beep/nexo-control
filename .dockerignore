@@ -1,0 +1,13 @@
+**
+!package.json
+!package-lock.json
+!server.cjs
+!lib/
+!lib/**
+!scripts/
+!scripts/create-admin.cjs
+!dist/
+!dist/**
+!docker/
+!docker/nginx.conf
+!Dockerfile

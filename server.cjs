@@ -11,7 +11,7 @@ function createApp(config = {}) {
   const secure = parsedOrigin.protocol === 'https:';
   if (!secure && !['127.0.0.1','localhost','[::1]'].includes(parsedOrigin.hostname)) throw new Error('Los despliegues remotos requieren HTTPS.');
   if (process.env.NODE_ENV === 'production' && !secure) throw new Error('APP_ORIGIN debe usar HTTPS en producción.');
-  const db = A.openDatabase(config.database || process.env.DATABASE_PATH || './data/nexo.sqlite');
+  const db = A.openDatabase(config.database || {});
   const clientId = config.googleClientId ?? process.env.GOOGLE_CLIENT_ID;
   const clientSecret = config.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET;
   const googleReady = !!(clientId && clientSecret);
@@ -29,13 +29,13 @@ function createApp(config = {}) {
     try { const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value)) A.bad('JSON inválido.'); return value; }
     catch { A.bad('JSON inválido.'); }
   }
-  function setSession(req,res,id) {
+  async function setSession(req,res,id) {
     const previous = cookies(req)[cookieName];
-    if (previous) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(A.digest(previous));
-    res.setHeader('Set-Cookie', cookie(cookieName, A.createSession(db,id), 8*3600));
+    if (previous) (await db.deleteSession(A.digest(previous)));
+    res.setHeader('Set-Cookie', cookie(cookieName, (await A.createSession(db,id)), 8*3600));
   }
-  function authenticate(req, active = false) {
-    const user = A.sessionUser(db, cookies(req)[cookieName]);
+  async function authenticate(req, active = false) {
+    const user = (await A.sessionUser(db, cookies(req)[cookieName]));
     if (!user) A.bad('Inicia sesión para continuar.', 401);
     if (active && user.status !== 'active') A.bad('Tu cuenta está pendiente de aprobación.', 403);
     return user;
@@ -48,50 +48,64 @@ function createApp(config = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     if (secure) res.setHeader('Strict-Transport-Security','max-age=31536000');
     try {
+      await db.ready;
       const url = new URL(req.url, origin), route = url.pathname;
+      if (route==='/health/live' && req.method==='GET') return json(res,200,{ok:true});
+      if (route==='/health/ready' && req.method==='GET') {
+        try { await db.health(); }
+        catch { return json(res,503,{ok:false}); }
+        return json(res,200,{ok:true});
+      }
       if (['POST','PATCH','DELETE','PUT'].includes(req.method) && req.headers.origin !== origin) A.bad('Origen de solicitud no permitido.',403);
       if (route==='/api/v1/auth/config' && req.method==='GET') return json(res,200,{googleEnabled:googleReady,registrationEnabled:true});
       if (route==='/api/v1/auth/register' && req.method==='POST') {
-        A.rateLimit(db,'register:'+req.socket.remoteAddress,5);
+        (await A.rateLimit(db,'register:'+req.socket.remoteAddress,5));
         const input=await body(req),email=A.validateEmail(input.email),name=A.validateName(input.name);
         const password=await A.hashPassword(input.password);
         // Never disclose whether the address already has an account.
-        if (!db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
+        await db.transaction(async () => {
           const id=randomUUID();
-          db.prepare(`INSERT INTO users(id,email,name,password_hash,created_at) VALUES (?,?,?,?,?)`).run(id,email,name,password,new Date().toISOString());
-          A.audit(db,id,id,'account.register');
-        }
+          const inserted=await db.createUser({id:id,email:email,name:name,password_hash:password,created_at:new Date().toISOString()});
+          if(inserted)await A.audit(db,id,id,'account.register');
+        });
         return json(res,202,{message:'Solicitud recibida. Si es una cuenta nueva, un administrador debe aprobarla. Si ya tienes cuenta, inicia sesión.'});
       }
       if (route==='/api/v1/auth/login' && req.method==='POST') {
         const input=await body(req),email=A.emailOf(input.email);
-        A.rateLimit(db,'login-ip:'+req.socket.remoteAddress,30); A.rateLimit(db,'login-email:'+A.digest(email),10);
-        const user=db.prepare('SELECT * FROM users WHERE email=?').get(email);
+        (await A.rateLimit(db,'login-ip:'+req.socket.remoteAddress,30)); (await A.rateLimit(db,'login-email:'+A.digest(email),10));
+        const user=(await db.findUser('email',email));
         if (!await A.verifyPassword(input.password,user?.password_hash) || user.status==='disabled') A.bad('Correo o contraseña incorrectos.',401);
-        setSession(req,res,user.id);A.audit(db,user.id,user.id,'session.login');
+        await db.transaction(async () => {
+          const current=await db.getUser(user.id);
+          if(!current || current.password_hash!==user.password_hash || current.status==='disabled')A.bad('Correo o contraseña incorrectos.',401);
+          await setSession(req,res,user.id);
+          await A.audit(db,user.id,user.id,'session.login');
+        });
         return json(res,200,{user:A.publicUser(user)});
       }
       if (route==='/api/v1/auth/logout' && req.method==='POST') {
-        const token=cookies(req)[cookieName];if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(A.digest(token));
+        const token=cookies(req)[cookieName];if(token)(await db.deleteSession(A.digest(token)));
         res.setHeader('Set-Cookie',cookie(cookieName,'',0));return json(res,200,{ok:true});
       }
       if (route==='/api/v1/auth/google' && req.method==='GET') {
-        if (!googleReady) return redirect(res,'/?auth_error=google_unavailable');
-        A.rateLimit(db,'google:'+req.socket.remoteAddress,30);
+        if (!googleReady) {
+          if (req.headers.accept === 'application/json') return json(res,503,{error:'El acceso con Google aún no está configurado.'});
+          return redirect(res,'/?auth_error=google_unavailable');
+        }
+        (await A.rateLimit(db,'google:'+req.socket.remoteAddress,30));
         const state=A.secret(),binding=A.secret(),nonce=A.secret(),verifier=A.secret();
-        db.prepare('DELETE FROM oauth_states WHERE expires_at<=?').run(Date.now());
-        db.prepare('INSERT INTO oauth_states VALUES (?,?,?,?,?)').run(A.digest(state),A.digest(binding),nonce,verifier,Date.now()+600000);
+        (await db.saveOAuth({state_hash:A.digest(state),binding_hash:A.digest(binding),nonce:nonce,verifier:verifier,expires_at:Date.now()+600000}));
         res.setHeader('Set-Cookie',cookie(oauthCookie,binding,600));
         const target=new URL('https://accounts.google.com/o/oauth2/v2/auth');
         target.search=new URLSearchParams({client_id:clientId,redirect_uri:callback,response_type:'code',scope:'openid email profile',state,nonce,prompt:'select_account',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'});
+        if (req.headers.accept === 'application/json') return json(res,200,{url:target.toString()});
         return redirect(res,target.toString());
       }
       if (route==='/api/v1/auth/google/callback' && req.method==='GET') {
         if (!googleReady) return redirect(res,'/?auth_error=google_unavailable');
-        const state=db.prepare('SELECT * FROM oauth_states WHERE state_hash=?').get(A.digest(url.searchParams.get('state')||''));
+        const state=(await db.consumeOAuth(A.digest(url.searchParams.get('state')||''),A.digest(cookies(req)[oauthCookie]||''),Date.now()));
         res.setHeader('Set-Cookie',cookie(oauthCookie,'',0));
         if (!state || state.expires_at<Date.now() || state.binding_hash!==A.digest(cookies(req)[oauthCookie]||'')) return redirect(res,'/?auth_error=google_failed');
-        db.prepare('DELETE FROM oauth_states WHERE state_hash=?').run(state.state_hash);
         if (url.searchParams.has('error') || !url.searchParams.get('code')) return redirect(res,'/?auth_error=google_cancelled');
         try {
           const {tokens}=await google.getToken({code:url.searchParams.get('code'),codeVerifier:state.verifier,redirect_uri:callback});
@@ -99,70 +113,81 @@ function createApp(config = {}) {
           const claims=ticket.getPayload();
           if (!claims || !claims.email_verified || claims.nonce!==state.nonce || !claims.sub) throw new Error('Invalid Google identity');
           const email=A.validateEmail(claims.email);
-          let user=db.prepare('SELECT * FROM users WHERE google_sub=?').get(claims.sub);
+          let user=(await db.findUser('google_sub',claims.sub));
           if (!user) {
             // Do not silently link a password account based only on matching email.
-            if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) return redirect(res,'/?auth_error=account_exists');
+            if ((await db.findUser('email',email))) return redirect(res,'/?auth_error=account_exists');
             const id=randomUUID(), name=String(claims.name||email.split('@')[0]).slice(0,80);
-            db.prepare('INSERT INTO users(id,email,name,google_sub,created_at) VALUES (?,?,?,?,?)').run(id,email,name,claims.sub,new Date().toISOString());
-            user=db.prepare('SELECT * FROM users WHERE id=?').get(id);A.audit(db,id,id,'account.google.register');
+            (await db.createUser({id:id,email:email,name:name,google_sub:claims.sub,created_at:new Date().toISOString()}));
+            user=(await db.getUser(id));(await A.audit(db,id,id,'account.google.register'));
           }
           if(user.status==='disabled')return redirect(res,'/?auth_error=account_disabled');
-          user=A.applyGoogleApproval(db,user);
-          setSession(req,res,user.id);
+          user=(await A.applyGoogleApproval(db,user));
+          (await setSession(req,res,user.id));
           // Clear the transaction cookie as well as setting the new session.
           res.setHeader('Set-Cookie',[res.getHeader('Set-Cookie'),cookie(oauthCookie,'',0)]);
-          A.audit(db,user.id,user.id,'session.google');return redirect(res,'/');
-        } catch { return redirect(res,'/?auth_error=google_failed'); }
+          (await A.audit(db,user.id,user.id,'session.google'));return redirect(res,'/');
+        } catch(error) { return redirect(res,error.status===503?'/?auth_error=service_unavailable':'/?auth_error=google_failed'); }
       }
-      if (route==='/api/v1/me' && req.method==='GET') return json(res,200,{user:A.publicUser(authenticate(req))});
+      if (route==='/api/v1/me' && req.method==='GET') return json(res,200,{user:A.publicUser((await authenticate(req)))});
       if (route==='/api/v1/me' && req.method==='PATCH') {
-        const user=authenticate(req),input=await body(req),name=A.validateName(input.name);
+        const user=(await authenticate(req)),input=await body(req),name=A.validateName(input.name);
         if(typeof input.department!=='string'||input.department.length>80||typeof input.phone!=='string'||input.phone.length>30)A.bad('Revisa el departamento y teléfono.');
         if(Object.keys(input).some(k=>!['name','department','phone'].includes(k)))A.bad('Solo puedes editar tus datos de perfil.');
-        db.prepare('UPDATE users SET name=?,department=?,phone=? WHERE id=?').run(name,input.department.trim(),input.phone.trim(),user.id);
-        A.audit(db,user.id,user.id,'profile.update');return json(res,200,{user:A.publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(user.id))});
+        (await db.updateUser(user.id,{name:name,department:input.department.trim(),phone:input.phone.trim()}));
+        (await A.audit(db,user.id,user.id,'profile.update'));return json(res,200,{user:A.publicUser((await db.getUser(user.id)))});
       }
       if (route==='/api/v1/me/password' && req.method==='POST') {
-        const user=authenticate(req),input=await body(req);A.rateLimit(db,'password:'+user.id,5);
+        const user=(await authenticate(req)),input=await body(req);(await A.rateLimit(db,'password:'+user.id,5));
         if(!user.password_hash)A.bad('Esta cuenta administra su contraseña en Google.');
         if(!await A.verifyPassword(input.currentPassword,user.password_hash))A.bad('La contraseña actual no es correcta.',400);
         const hash=await A.hashPassword(input.newPassword);
-        db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash,user.id);
-        db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);setSession(req,res,user.id);
-        A.audit(db,user.id,user.id,'password.change');return json(res,200,{ok:true});
+        await db.transaction(async () => {
+          const current=await authenticate(req);
+          if(current.password_hash!==user.password_hash)A.bad('La contraseña cambió. Inicia sesión de nuevo.',409);
+          await db.updateUser(user.id,{password_hash:hash});
+          await db.revokeSessions(user.id);
+          await setSession(req,res,user.id);
+          await A.audit(db,user.id,user.id,'password.change');
+        });
+        return json(res,200,{ok:true});
       }
       if(route==='/api/v1/email-approvals') {
-        const actor=authenticate(req,true);if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
-        if(req.method==='GET')return json(res,200,{approvals:db.prepare('SELECT email,role,created_at FROM email_approvals ORDER BY created_at DESC').all()});
+        const actor=(await authenticate(req,true));if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
+        if(req.method==='GET')return json(res,200,{approvals:(await db.listApprovals())});
         if(req.method==='POST' || req.method==='DELETE') {
           const input=await body(req),email=A.validateEmail(input.email);
+          await db.transaction(async () => {
+          const currentActor=await authenticate(req,true);
+          if(currentActor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
           if(req.method==='POST') {
             if(!A.ROLES.includes(input.role))A.bad('Perfil inválido.');
-            if(db.prepare('SELECT id FROM users WHERE email=?').get(email))A.bad('Este correo ya está registrado. Modifica su estado en la lista de usuarios.',409);
-            db.prepare('INSERT INTO email_approvals VALUES (?,?,?,?) ON CONFLICT(email) DO UPDATE SET role=excluded.role,approved_by=excluded.approved_by,created_at=excluded.created_at').run(email,input.role,actor.id,new Date().toISOString());
-          } else db.prepare('DELETE FROM email_approvals WHERE email=?').run(email);
-          A.audit(db,actor.id,null,req.method==='POST'?'access.email.approved':'access.email.revoked',{email});
+            if((await db.findUser('email',email)))A.bad('Este correo ya está registrado. Modifica su estado en la lista de usuarios.',409);
+            (await db.saveApproval({email:email,role:input.role,approved_by:actor.id,created_at:new Date().toISOString()}));
+          } else (await db.deleteApproval(email));
+          (await A.audit(db,actor.id,null,req.method==='POST'?'access.email.approved':'access.email.revoked',{email}));
+          });
           return json(res,200,{ok:true});
         }
         A.bad('Método no permitido.',405);
       }
       if(route==='/api/v1/users' || /^\/api\/v1\/users\/[^/]+$/.test(route)) {
-        const actor=authenticate(req,true);if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
-        if(route==='/api/v1/users' && req.method==='GET')return json(res,200,{users:db.prepare('SELECT * FROM users ORDER BY created_at DESC').all().map(A.publicUser)});
+        const actor=(await authenticate(req,true));if(actor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
+        if(route==='/api/v1/users' && req.method==='GET')return json(res,200,{users:(await db.listUsers()).map(A.publicUser)});
         if(req.method==='PATCH' && route!=='/api/v1/users') {
           const id=route.split('/').pop(),input=await body(req);
           if(!A.ROLES.includes(input.role)||!A.STATUSES.includes(input.status)||Object.keys(input).some(k=>!['role','status'].includes(k)))A.bad('Rol o estado inválido.');
-          const target=db.prepare('SELECT * FROM users WHERE id=?').get(id);if(!target)A.bad('Usuario no encontrado.',404);
-          db.exec('BEGIN IMMEDIATE');
-          try {
-            if(target.role==='administrador'&&target.status==='active'&&(input.role!=='administrador'||input.status!=='active')&&db.prepare("SELECT count(*) AS n FROM users WHERE role='administrador' AND status='active'").get().n<=1)A.bad('Debes conservar al menos un administrador activo.',409);
-            db.prepare('UPDATE users SET role=?,status=? WHERE id=?').run(input.role,input.status,id);
-            db.prepare('DELETE FROM sessions WHERE user_id=?').run(id);
-            db.prepare('DELETE FROM email_approvals WHERE email=?').run(target.email);
-            A.audit(db,actor.id,id,'access.update',{role:input.role,status:input.status});db.exec('COMMIT');
-          }catch(error){db.exec('ROLLBACK');throw error;}
-          return json(res,200,{user:A.publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id))});
+          await db.transaction(async () => {
+            const currentActor=await authenticate(req,true);
+            if(currentActor.role!=='administrador')A.bad('Se requieren permisos de administrador.',403);
+            const target=(await db.getUser(id));if(!target)A.bad('Usuario no encontrado.',404);
+            if(target.role==='administrador'&&target.status==='active'&&(input.role!=='administrador'||input.status!=='active')&&await db.countAdmins()<=1)A.bad('Debes conservar al menos un administrador activo.',409);
+            (await db.updateUser(id,{role:input.role,status:input.status}));
+            (await db.revokeSessions(id));
+            (await db.deleteApproval(target.email));
+            (await A.audit(db,actor.id,id,'access.update',{role:input.role,status:input.status}));
+          });
+          return json(res,200,{user:A.publicUser((await db.getUser(id)))});
         }
         A.bad('Método no permitido.',405);
       }
@@ -171,14 +196,32 @@ function createApp(config = {}) {
       const allowed={'/':'index.html','/index.html':'index.html','/styles.css':'styles.css','/auth.css':'auth.css','/auth.js':'auth.js','/app.js':'app.js'};
       if(!allowed[route])A.bad('Archivo no encontrado.',404);
       // The operational bundle is never delivered to anonymous or pending users.
-      if(route==='/app.js')authenticate(req,true);
+      if(route==='/app.js')(await authenticate(req,true));
       const filename=allowed[route],content=fs.readFileSync(path.join(__dirname,'dist',filename));
       const type=filename.endsWith('.css')?'text/css':filename.endsWith('.js')?'text/javascript':'text/html';
       res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(req.method==='HEAD'?undefined:content);
-    } catch(error) { json(res,error.status||500,{error:error.status?error.message:'Ocurrió un error. Intenta de nuevo.'}); }
+    } catch(error) {
+      const route = new URL(req.url, origin).pathname;
+      if (req.method==='GET' && ['/api/v1/auth/google','/api/v1/auth/google/callback'].includes(route) && req.headers.accept !== 'application/json') {
+        res.setHeader('Set-Cookie',cookie(oauthCookie,'',0));
+        return redirect(res,error.status===429?'/?auth_error=too_many_attempts':'/?auth_error=service_unavailable');
+      }
+      json(res,error.status||500,{error:error.status?error.message:'Ocurrió un error. Intenta de nuevo.'});
+    }
   });
-  server.on('close',()=>db.close());
-  return {server,db};
+  const closed = new Promise(resolve => server.on('close',()=>{ db.close().then(resolve, resolve); }));
+  return {server,db,ready:db.ready,closed};
 }
-if(require.main===module){const {server}=createApp();const port=Number(process.env.PORT||4173);server.listen(port,process.env.HOST||'127.0.0.1',()=>console.log(`JIDE NOVA CORE: ${process.env.APP_ORIGIN||'http://127.0.0.1:'+port}`));}
+if(require.main===module){
+  (async()=>{
+    const app=createApp();
+    try { await app.ready; } catch(error) { await app.db.close(); throw error; }
+    const port=Number(process.env.PORT||4173);
+    app.server.listen(port,process.env.HOST||'127.0.0.1',()=>console.log(`JIDE NOVA CORE: ${process.env.APP_ORIGIN||'http://127.0.0.1:'+port}`));
+    for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{
+      app.server.close();
+      setTimeout(()=>process.exit(1),10000).unref();
+    });
+  })().catch(()=>{console.error('No se pudo iniciar la API. Revisa la configuración y la conexión a la base de datos.');process.exitCode=1;});
+}
 module.exports={createApp};

@@ -4,13 +4,15 @@ const { openDatabase, validateEmail, validateName, hashPassword, audit } = requi
   const email = validateEmail(process.env.BOOTSTRAP_ADMIN_EMAIL);
   const name = validateName(process.env.BOOTSTRAP_ADMIN_NAME);
   const password = await hashPassword(process.env.BOOTSTRAP_ADMIN_PASSWORD);
-  const db = openDatabase(process.env.DATABASE_PATH || './data/nexo.sqlite');
+  const db = openDatabase();
   try {
-    if (db.prepare('SELECT id FROM users WHERE email=?').get(email)) throw new Error('Ese correo ya existe. No se modificó la cuenta.');
-    const id = randomUUID();
-    db.prepare(`INSERT INTO users(id,email,name,password_hash,role,status,created_at) VALUES (?,?,?,?,'administrador','active',?)`)
-      .run(id, email, name, password, new Date().toISOString());
-    audit(db, id, id, 'admin.bootstrap');
+    await db.ready;
+    await db.transaction(async () => {
+      if (await db.findUser('email',email)) throw new Error('Ese correo ya existe. No se modificó la cuenta.');
+      const id = randomUUID();
+      await db.createUser({id:id,email:email,name:name,password_hash:password,role:'administrador',status:'active',created_at:new Date().toISOString()});
+      await audit(db, id, id, 'admin.bootstrap');
+    });
     console.log('Administrador creado. Retira BOOTSTRAP_ADMIN_PASSWORD de .env.');
-  } finally { db.close(); }
+  } finally { await db.close(); }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

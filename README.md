@@ -1,151 +1,133 @@
-# JIDE NOVA CORE
+# JIDE NOVA CORE · Nexo
 
-## Nexo · Centro de Control
+Aplicación de inventario con autenticación, perfiles y administración de usuarios. La base de datos online es **Cloud Firestore de Firebase**. Docker ejecuta el frontend y la API en contenedores independientes. Las pantallas de inventario, compras y movimientos todavía usan datos de demostración en el navegador.
 
-Aplicación web de **JIDE NOVA CORE** con autenticación, perfiles y administración de usuarios. El inventario continúa utilizando datos de demostración.
+## Configurar Firebase
 
-## Funcionalidades
+Proyecto asociado: `jide-nexo-25bf6` (**JIDE NEXO**), base `(default)` en `northamerica-south1` (México), plan Spark. `.firebaserc` contiene el proyecto predeterminado para la CLI.
 
-- Inicio y cierre de sesión con correo y contraseña.
-- Solicitud de cuenta con aprobación del administrador.
-- Perfil persistente: nombre, departamento y teléfono.
-- Cambio de contraseña y revocación de otras sesiones.
-- Perfiles: **Administrador, Compras, Almacén y Consulta**.
-- Activación, suspensión y cambio de roles desde Usuarios.
-- Integración Google OpenID Connect, pendiente de configurar un cliente OAuth real.
-- Inventario multi-almacén, lotes, compras, movimientos, mermas y exportación CSV de demostración.
-
-## Ejecutar localmente
-
-Requiere **Node.js 24 o superior**.
+1. Abre [Firebase Console](https://console.firebase.google.com/) y crea o selecciona un proyecto.
+2. En **Firestore Database**, crea una base **Standard / Native mode** con ID `(default)` y reglas de producción. Selecciona una región cercana al servidor de la API.
+3. Copia `.env.example` a `.env` solo si no existe. Completa `FIREBASE_PROJECT_ID` con el ID del proyecto, no con su nombre visible. Si ya tenías `.env`, agrega las variables de Firebase del ejemplo; `DATABASE_URL`, `DATABASE_PATH` y `CLOUD_SQL_INSTANCE` ya no se utilizan.
+4. Configura las credenciales del servidor con Application Default Credentials (ADC). En desarrollo puedes ejecutar `gcloud auth application-default login`; asigna a la identidad acceso IAM a Firestore, por ejemplo **Cloud Datastore User**. También se admite un archivo JSON de cuenta de servicio, guardado fuera del repositorio. En `.env`, `GOOGLE_APPLICATION_CREDENTIALS` debe contener la ruta absoluta del archivo. En Windows usa barras `/`.
+5. Publica las reglas e índices del proyecto desde una sesión autorizada de Firebase CLI:
 
 ```sh
 npm ci
+npx firebase login
+npx firebase deploy --only firestore --project TU_PROYECTO
 ```
 
-Copia `.env.example` a `.env`. Conserva inicialmente:
+Las reglas de `firestore.rules` bloquean todo acceso directo desde clientes. La API accede mediante IAM y comprueba las sesiones y los permisos en cada endpoint. Las credenciales del servidor no se incluyen en las imágenes ni se envían al navegador. En infraestructura de Google, utiliza preferentemente una cuenta de servicio asociada al entorno, sin archivos de claves.
 
-```dotenv
-HOST=127.0.0.1
-PORT=4173
-APP_ORIGIN=http://127.0.0.1:4173
-DATABASE_PATH=./data/nexo.sqlite
-```
+Los documentos se guardan en `nexo/{FIRESTORE_NAMESPACE}/{coleccion}`. Las colecciones son `users`, `identities`, `sessions`, `email_approvals`, `oauth_states`, `rate_limits`, `audit` y `metadata`. Las identidades únicas por correo y por cuenta Google se reservan mediante transacciones. Los cambios de acceso protegen al último administrador activo. La revocación de sesiones utiliza una versión por usuario, sin depender de eliminar grandes lotes de documentos.
 
-Después ejecuta:
+La configuración de índices es compatible con Spark y no activa políticas TTL: el borrado TTL requiere facturación habilitada según los [límites de Firestore](https://firebase.google.com/docs/firestore/quotas). La API verifica siempre la expiración de sesiones, estados OAuth y límites de intentos. Sus documentos vencidos permanecen almacenados hasta implementar una limpieza o autorizar TTL con facturación; `delete_after` conserva la fecha prevista para esa limpieza.
+
+## Ejecutar con Docker
+
+Requiere Docker Desktop iniciado con contenedores Linux. Desde la carpeta del proyecto:
 
 ```sh
+docker compose -f compose.yaml -f compose.firebase.yaml up --build -d
+```
+
+Abre <http://127.0.0.1:4173>.
+
+- `web`: Nginx sirve el frontend y reenvía las solicitudes a la API. Publica únicamente el puerto web en localhost.
+- `auth-api`: Node.js 24, autenticación, usuarios y acceso a Firestore mediante el SDK oficial. No publica puertos al host.
+- Firebase mantiene la base de datos online. No hay contenedor SQL ni proxy de base de datos.
+
+`compose.firebase.yaml` monta las credenciales como secreto de solo lectura. En un entorno Google con identidad de servicio adjunta, usa `compose.yaml` sin ese archivo adicional. No se crea ningún recurso cloud automáticamente.
+
+Para producción configura `NODE_ENV=production`, `APP_ORIGIN=https://tu-dominio` y un proxy HTTPS o balanceador delante del puerto web. En producción se rechazan el almacenamiento de pruebas en memoria y el emulador. `/health/live` comprueba que la API esté funcionando; `/health/ready` comprueba acceso a Firestore. Las comprobaciones frecuentes de readiness generan lecturas de Firestore.
+
+Para ejecutar sin Docker, con las mismas variables Firebase configuradas:
+
+```sh
+npm ci
 npm start
 ```
 
-Abre <http://127.0.0.1:4173>. Abrir directamente `dist/index.html` o desplegar solo `dist/` no proporciona autenticación.
+Abrir directamente `dist/index.html`, publicar solo `dist/` o usar GitHub Pages no ejecuta la API.
 
-### Crear el primer administrador
+## Crear el primer administrador
 
-En tu archivo local `.env`, configura `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME` y `BOOTSTRAP_ADMIN_PASSWORD`. Usa una contraseña única de entre 12 y 128 caracteres. No existen credenciales predeterminadas.
+Completa `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME` y `BOOTSTRAP_ADMIN_PASSWORD` en `.env`. Usa una contraseña única de 12 a 128 caracteres. Ejecuta en PowerShell o Bash:
 
 ```sh
-npm run admin:create
+docker compose -f compose.yaml -f compose.firebase.yaml run --rm --volume "${PWD}/.env:/app/.env:ro" auth-api npm run admin:create
 ```
 
-Retira la contraseña de inicialización de `.env` después de crear la cuenta. El comando no reemplaza cuentas existentes. Si registraste antes ese correo en la interfaz, usa otro correo para el administrador inicial y aprueba la cuenta pendiente desde Usuarios.
+Sin Docker: `npm run admin:create`. El comando no reemplaza cuentas existentes. Elimina la contraseña de inicialización de `.env` después de crear la cuenta.
 
-Las cuentas nuevas reciben el rol **Consulta** y estado **Pendiente**. Para aprobarlas: inicia sesión como administrador → abre tu perfil → **Usuarios** → asigna perfil y estado **Activo**. El usuario debe iniciar sesión de nuevo.
+Las cuentas nuevas reciben rol **Consulta** y estado **Pendiente**. Un administrador las aprueba desde **Mi perfil → Usuarios**. El registro por contraseña no verifica la propiedad del correo; el administrador debe verificar la identidad antes de aprobar. Se conserva el inicio de sesión existente por contraseña y Google OpenID Connect; los usuarios y sesiones se almacenan en Firestore.
 
-Los registros por contraseña **no verifican la propiedad del correo electrónico**: el administrador debe verificar la identidad por otro medio antes de aprobar. La recuperación automática por correo y las invitaciones quedan pendientes.
+## Inicio de sesión con Google
 
-## Configurar inicio de sesión con Google
+En Google Auth Platform, configura Branding, Audience y los scopes `openid`, `email` y `profile`. Crea un cliente OAuth de tipo aplicación web y registra la URI:
 
-1. En Google Cloud, selecciona tu proyecto y configura Google Auth Platform: Branding, Audience y los scopes `openid`, `email` y `profile`.
-2. Crea un cliente OAuth de tipo **Aplicación web**.
-3. Registra exactamente esta URI de redirección para desarrollo:
+```text
+http://127.0.0.1:4173/api/v1/auth/google/callback
+```
 
-   ```text
-   http://127.0.0.1:4173/api/v1/auth/google/callback
-   ```
+Configura `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env`. Para producción registra `https://TU-DOMINIO/api/v1/auth/google/callback` y ajusta `APP_ORIGIN`. El botón Google solo se habilita cuando existen ambas variables. La identidad OAuth de los usuarios y las credenciales IAM de Firestore son configuraciones distintas.
 
-4. Configura `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en `.env` y reinicia el servidor. No los escribas en el frontend ni los subas a GitHub.
-5. Si la aplicación está en modo de pruebas, añade los usuarios de prueba autorizados en Google.
-6. Para producción, usa un dominio HTTPS, ajusta `APP_ORIGIN` sin barra final y registra `https://TU-DOMINIO/api/v1/auth/google/callback`.
+El flujo utiliza estado ligado al navegador, PKCE, nonce y verificación del ID token. Una identidad Google nueva también necesita aprobación; no se vincula automáticamente con una cuenta de contraseña que tenga el mismo correo. La integración requiere credenciales reales para probar el inicio de sesión completo.
 
-El botón Google solo se habilita con configuración del servidor. La integración no se ha probado contra una cuenta de Google real sin esas credenciales. Google identifica a la persona; **no le asigna acceso automático a JIDE NOVA CORE**. Una cuenta nueva con Google también necesita aprobación.
+En **Mi perfil y usuarios → Usuarios → Aprobar un correo**, un administrador puede autorizar anticipadamente un correo y su perfil. La aprobación se consume cuando Google verifica la identidad. Los registros por contraseña requieren revisión manual. No se envían correos ni se crean contraseñas por aprobar una dirección.
 
-No se vincula automáticamente una cuenta con contraseña a una identidad de Google que tenga el mismo correo. En ese caso se conserva el acceso con contraseña; la vinculación explícita queda pendiente.
+## Seguridad y API
 
-Referencias: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect) y [biblioteca oficial para Node.js](https://github.com/googleapis/google-auth-library-nodejs).
-
-## Seguridad y perfiles
-
-| Perfil | Acceso actual |
-| --- | --- |
-| Administrador | Perfil, administración de usuarios y todos los formularios de demostración |
-| Compras | Perfil, consultas y borradores de compra de demostración |
-| Almacén | Perfil, consultas, entradas, salidas y mermas de demostración |
-| Consulta | Perfil y lectura/exportación del inventario de demostración |
-
-- Sesiones opacas de 8 horas almacenadas como hashes; cookies `HttpOnly`, `SameSite=Lax` y `Secure` con HTTPS.
-- Contraseñas con scrypt y sal aleatoria; sin contraseñas ni tokens en localStorage.
-- Comprobación de origen en escrituras y límites de intentos persistentes en SQLite.
-- Permisos y estado verificados en endpoints de perfiles y usuarios. Cambiar acceso revoca sesiones.
-- Protección del último administrador activo.
-- Auditoría de accesos y cambios de perfil, contraseña y permisos.
-- Google: código de autorización, PKCE, estado ligado al navegador, nonce y verificación del ID token con la biblioteca oficial.
-
-**Límite actual:** el inventario sigue siendo una demostración en memoria del navegador; los controles de rol sobre esos formularios son solo de interfaz. No representan autorización para datos reales. El futuro backend debe validar cada permiso y transacción. La autenticación y los perfiles sí tienen persistencia y autorización en servidor.
-
-## API
+Roles: **Administrador, Compras, Almacén y Consulta**. Estados: pendiente, activo y suspendido. Las sesiones usan cookies `HttpOnly`, `SameSite=Lax` y `Secure` con HTTPS, caducan a las 8 horas y se almacenan mediante hashes. Las contraseñas usan scrypt y sal aleatoria. Las escrituras requieren `Origin` igual a `APP_ORIGIN`. Los límites de intentos persisten en Firestore; detrás de Nginx el límite por IP es compartido porque la API no confía en cabeceras de IP arbitrarias.
 
 ```http
-GET   /api/v1/auth/config
-POST  /api/v1/auth/register
-POST  /api/v1/auth/login
-POST  /api/v1/auth/logout
-GET   /api/v1/auth/google
-GET   /api/v1/auth/google/callback
-GET   /api/v1/me
-PATCH /api/v1/me
-POST  /api/v1/me/password
-GET   /api/v1/users
-PATCH /api/v1/users/{id}
+GET    /api/v1/auth/config
+POST   /api/v1/auth/register
+POST   /api/v1/auth/login
+POST   /api/v1/auth/logout
+GET    /api/v1/auth/google
+GET    /api/v1/auth/google/callback
+GET    /api/v1/me
+PATCH  /api/v1/me
+POST   /api/v1/me/password
+GET    /api/v1/users
+PATCH  /api/v1/users/{id}
+GET    /api/v1/email-approvals
+POST   /api/v1/email-approvals
+DELETE /api/v1/email-approvals
 ```
 
-Las escrituras reciben JSON y `Origin` igual a `APP_ORIGIN`. Esta implementación usa sesiones web del mismo origen; una futura PWA en otro origen requiere diseñar explícitamente ese flujo.
+El inventario continúa siendo una demostración: sus controles de rol son de interfaz y los cambios se pierden al recargar. Usuarios, perfiles, aprobaciones y sesiones sí tienen persistencia y autorización en servidor. Cambiar la conexión no importa datos de SQLite o PostgreSQL: conserva tus respaldos si necesitas migrar cuentas anteriores.
 
 ## Pruebas
 
 ```sh
 npm test
+npm run test:firestore
 ```
 
-Pruebas con bases aisladas: acceso anónimo/pendiente, escalamiento de privilegios, aprobación, suspensión, CSRF, contraseñas, revocación, límites de intentos y validaciones del inicio del flujo Google. No llaman al proveedor real.
+El primer comando usa un repositorio en memoria aislado, exclusivo de pruebas. El segundo requiere Java 21 o superior e inicia el emulador oficial con el proyecto ficticio `demo-nexo`: no usa credenciales ni datos cloud. Ejecuta la misma suite y prueba sesiones compartidas entre conexiones. El emulador se cierra al terminar. CI ejecuta ambas variantes y construye las imágenes Docker.
 
-## Estructura
+Las pruebas cubren acceso anónimo y pendiente, aprobación, suspensión, CSRF, cambios de contraseña, revocación, concurrencia, protección del último administrador y validaciones OAuth. No llaman al proveedor Google real.
+
+## Archivos principales
 
 ```text
-dist/                    Frontend (código fuente, mantener en Git)
-  auth.js, auth.css      Login y perfiles
-  app.js, styles.css     Inventario de demostración
-  index.html             Entrada de la aplicación
-lib/auth.cjs             Persistencia, contraseñas, sesiones y validaciones
-server.cjs               API y servidor HTTP
-scripts/create-admin.cjs Creación local del primer administrador
-tests/auth.test.cjs      Pruebas de autenticación
-.env.example             Configuración sin secretos
-data/                    SQLite privado (excluido de Git)
+dist/                     Frontend
+lib/auth.cjs              Contraseñas, sesiones y validaciones
+lib/database.cjs          Repositorio de documentos Firestore
+server.cjs                API HTTP
+scripts/create-admin.cjs  Inicialización del administrador
+Dockerfile                Imágenes de frontend y API
+compose.yaml              Servicios Docker
+compose.firebase.yaml     Credenciales locales para Firebase online
+firebase.json             Configuración CLI y emulador
+firestore.rules           Bloqueo del acceso directo de clientes
+firestore.indexes.json     Índices compatibles con Spark
+.env.example              Variables sin secretos
 ```
 
-## Despliegue
+`.openai/hosting.json` corresponde al sitio estático anterior. Subir estos archivos a GitHub no actualiza ese sitio ni despliega los contenedores.
 
-### Aprobación de correos desde el administrador
-
-En **Mi perfil y usuarios → Usuarios → Aprobar un correo**, escribe el correo y elige su perfil. La aprobación queda guardada hasta que Google verifique esa identidad en su primer acceso. Puedes revocarla antes del registro. No se envían correos ni se crean contraseñas. Las cuentas ya registradas se administran en la lista de usuarios: selecciona **Activo** y **Guardar acceso**. Los registros con contraseña requieren revisión manual; una aprobación anticipada no verifica la propiedad de un correo.
-
-API exclusiva para administradores: `GET /api/v1/email-approvals`, `POST /api/v1/email-approvals` con `{ "email": "persona@example.com", "role": "consulta" }` y `DELETE /api/v1/email-approvals` con `{ "email": "persona@example.com" }`. Los cambios quedan auditados. Esta autorización interna no modifica la lista de usuarios de prueba de Google Cloud.
-
-Requiere **servidor Node.js con almacenamiento persistente**, HTTPS y variables de entorno. `NODE_ENV=production` exige un origen HTTPS. Con proxy inverso, usa `HOST=0.0.0.0` solo con acceso de red apropiado. Los límites de intentos usan la dirección del socket; detrás de un proxy el límite por IP será compartido. No se confía en cabeceras de IP arbitrarias.
-
-SQLite permite una sola instancia en esta etapa. Respalda su volumen privado; para múltiples réplicas y el inventario transaccional previsto, migra a PostgreSQL y almacenamiento compartido de sesiones y límites.
-
-`.openai/hosting.json` se conserva como referencia del sitio estático anterior. **Subir a GitHub no actualiza el sitio publicado anteriormente ni ejecuta este servidor.** GitHub Pages tampoco ejecuta Node.js. No publiques solo `dist/` esperando un login funcional.
-
-Las tipografías provienen de Google Fonts. El inventario inicial, fechas, métricas y recorridos son ilustrativos; los cambios de inventario se pierden al recargar.
+Referencias: [SDK de servidor para Firestore](https://firebase.google.com/docs/firestore/quickstart-server), [transacciones](https://firebase.google.com/docs/firestore/manage-data/transactions) y [emulador de Firestore](https://firebase.google.com/docs/emulator-suite/connect_firestore).

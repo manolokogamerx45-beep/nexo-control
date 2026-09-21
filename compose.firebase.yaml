@@ -1,0 +1,10 @@
+# Local Docker access to online Firebase. On Google-hosted infrastructure,
+# prefer the attached service identity and use compose.yaml without this file.
+services:
+  auth-api:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase_credentials
+    secrets: [firebase_credentials]
+secrets:
+  firebase_credentials:
+    file: ${GOOGLE_APPLICATION_CREDENTIALS:?Configura la ruta local de credenciales Firebase en .env}

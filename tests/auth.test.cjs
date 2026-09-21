@@ -18,46 +18,120 @@ test('email preapproval requires admin and verified Google identity, and is cons
   assert.equal((await request(route,{method:'POST',cookie:a.cookie,body})).status,200);
   assert.equal((await request(route,{cookie:a.cookie})).data.approvals.length,1);
   const id=randomUUID();
-  db.prepare('INSERT INTO users(id,email,name,created_at) VALUES (?,?,?,?)').run(id,'invited@example.test','Invited',new Date().toISOString());
-  let user=db.prepare('SELECT * FROM users WHERE id=?').get(id);
-  assert.equal(A.applyGoogleApproval(db,user).status,'pending');
+  (await db.createUser({id:id,email:'invited@example.test',name:'Invited',created_at:new Date().toISOString()}));
+  let user=(await db.getUser(id));
+  assert.equal((await A.applyGoogleApproval(db,user)).status,'pending');
   assert.equal((await request(route,{method:'POST',cookie:a.cookie,body})).status,409);
-  db.prepare('UPDATE users SET google_sub=? WHERE id=?').run('verified-test-sub',id);
-  user=A.applyGoogleApproval(db,db.prepare('SELECT * FROM users WHERE id=?').get(id));
+  (await db.updateUser(id,{google_sub:'verified-test-sub'}));
+  user=(await A.applyGoogleApproval(db,(await db.getUser(id))));
   assert.equal(user.status,'active');assert.equal(user.role,'compras');
   assert.equal((await request(route,{cookie:a.cookie})).data.approvals.length,0);
-  db.prepare('UPDATE users SET status=? WHERE id=?').run('disabled',id);
-  assert.equal(A.applyGoogleApproval(db,db.prepare('SELECT * FROM users WHERE id=?').get(id)).status,'disabled');
+  (await db.updateUser(id,{status:'disabled'}));
+  assert.equal((await A.applyGoogleApproval(db,(await db.getUser(id)))).status,'disabled');
   await request(route,{method:'POST',cookie:a.cookie,body:{email:'revoke@example.test',role:'consulta'}});
   assert.equal((await request(route,{method:'DELETE',cookie:a.cookie,body:{email:'revoke@example.test'}})).status,200);
   assert.equal((await request(route,{cookie:a.cookie})).data.approvals.length,0);
-  assert.equal(db.prepare("SELECT count(*) AS n FROM audit WHERE action='access.email.claimed'").get().n,1);
+  assert.equal((await ({n:(await db.listAudit('access.email.claimed')).length})).n,1);
 });
 async function fixture(t, config={}) {
-  const app=createApp({database:':memory:',origin:ORIGIN,googleClientId:'',googleClientSecret:'',...config});
+  const database=process.env.FIRESTORE_EMULATOR_HOST
+    ? { projectId:'demo-nexo', namespace:'test_'+randomUUID().replaceAll('-','') }
+    : { memory:true };
+  const app=createApp({database,origin:ORIGIN,googleClientId:'',googleClientSecret:'',...config});
+  await app.ready;
   await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
-  t.after(()=>new Promise(resolve=>app.server.close(resolve)));
+  t.after(async()=>{
+    await new Promise(resolve=>app.server.close(resolve));
+    await app.closed;
+  });
   const base='http://127.0.0.1:'+app.server.address().port;
-  async function request(route,{method='GET',cookie='',body,origin=ORIGIN}={}) {
-    const response=await fetch(base+route,{method,redirect:'manual',headers:{Origin:origin,'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
+  async function request(route,{method='GET',cookie='',body,origin=ORIGIN,accept}={}) {
+    const response=await fetch(base+route,{method,redirect:'manual',headers:{Origin:origin,'Content-Type':'application/json',...(accept?{Accept:accept}:{}),...(cookie?{Cookie:cookie}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{})});
     const text=await response.text();let data;try{data=JSON.parse(text);}catch{data=text;}
     return {status:response.status,headers:response.headers,data,cookie:response.headers.get('set-cookie')?.split(';')[0]};
   }
   async function seed(role='administrador', status='active') {
     const id=randomUUID(),email=id+'@example.test',password='A-strong-test-password-48';
     const hash=await A.hashPassword(password);
-    app.db.prepare('INSERT INTO users(id,email,name,password_hash,role,status,created_at) VALUES (?,?,?,?,?,?,?)').run(id,email,'Test User',hash,role,status,new Date().toISOString());
+    (await app.db.createUser({id:id,email:email,name:'Test User',password_hash:hash,role:role,status:status,created_at:new Date().toISOString()}));
     return {id,email,password};
   }
-  return {...app,request,seed};
+  return {...app,request,seed,database};
 }
+test('simultaneous rate limits and transactions preserve consistency',async t=>{
+  const {db}=await fixture(t);
+  const results=await Promise.allSettled(Array.from({length:20},()=>A.rateLimit(db,'parallel',5)));
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,5);
+  assert.ok(results.filter(r=>r.status==='rejected').every(r=>r.reason.status===429));
+  await assert.rejects(db.transaction(async()=>{
+    await A.audit(db,null,null,'rollback.test');
+    throw new Error('rollback');
+  }),/rollback/);
+  assert.equal((await ({n:(await db.listAudit('rollback.test')).length})).n,0);
+});
+test('Firestore shares sessions and rate limits between connections',{skip:!process.env.FIRESTORE_EMULATOR_HOST},async t=>{
+  const {database,db,seed}=await fixture(t);
+  const second=A.openDatabase(database);await second.ready;
+  try{
+    const user=await seed();
+    const token=await A.createSession(db,user.id);
+    assert.equal((await A.sessionUser(second,token)).id,user.id);
+    await second.revokeSessions(user.id);
+    assert.equal(await A.sessionUser(db,token),null);
+    const results=await Promise.allSettled(Array.from({length:20},(_,i)=>A.rateLimit(i%2?db:second,'replicas',5)));
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,5);
+  }finally{await second.close();}
+});
+test('concurrent identities and OAuth states are claimed only once',async t=>{
+  const {db}=await fixture(t);
+  const input={email:'unique@example.test',name:'Unique User',created_at:new Date().toISOString()};
+  const rows=await Promise.all(Array.from({length:8},()=>db.createUser({...input,id:randomUUID()})));
+  assert.equal(rows.filter(Boolean).length,1);
+  await db.saveOAuth({state_hash:'one-time',binding_hash:'browser',nonce:'nonce',verifier:'verifier',expires_at:Date.now()+60000});
+  const states=await Promise.all(Array.from({length:8},()=>db.consumeOAuth('one-time','browser',Date.now())));
+  assert.equal(states.filter(Boolean).length,1);
+  await assert.rejects(db.transaction(async()=>{
+    await db.createUser({...input,email:'rollback@example.test',id:randomUUID()});
+    throw new Error('rollback identity');
+  }),/rollback identity/);
+  assert.equal(await db.findUser('email','rollback@example.test'),undefined);
+});
+test('expiry is enforced without waiting for Firestore TTL cleanup',async t=>{
+  const {db,seed}=await fixture(t);const user=await seed();
+  const token='expired-session';
+  await db.saveSession({token_hash:A.digest(token),user_id:user.id,session_version:0,expires_at:Date.now()-1});
+  assert.equal(await A.sessionUser(db,token),null);
+  await db.saveRateLimit({key:'expired-rate',count:100,expires_at:Date.now()-1});
+  await A.rateLimit(db,'expired-rate',1);
+  await assert.rejects(A.rateLimit(db,'expired-rate',1),error=>error.status===429);
+  await db.saveOAuth({state_hash:'expired',binding_hash:'browser',nonce:'nonce',verifier:'verifier',expires_at:Date.now()-1});
+  assert.equal(await db.consumeOAuth('expired','browser',Date.now()),undefined);
+});
+test('Firestore rules reject direct browser access',{skip:!process.env.FIRESTORE_EMULATOR_HOST},async t=>{
+  const {database,seed}=await fixture(t);const user=await seed();
+  const endpoint=`http://${process.env.FIRESTORE_EMULATOR_HOST}/v1/projects/demo-nexo/databases/(default)/documents/nexo/${database.namespace}/users/${A.digest(user.id)}`;
+  assert.equal((await fetch(endpoint)).status,403);
+  assert.equal((await fetch(endpoint,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({fields:{role:{stringValue:'administrador'}}})})).status,403);
+});
+test('simultaneous administrator changes retain an active administrator',async t=>{
+  const {request,seed,db}=await fixture(t);
+  const a=await seed(),b=await seed();
+  const loginA=await request('/api/v1/auth/login',{method:'POST',body:a});
+  const loginB=await request('/api/v1/auth/login',{method:'POST',body:b});
+  const responses=await Promise.all([
+    request('/api/v1/users/'+a.id,{method:'PATCH',cookie:loginA.cookie,body:{role:'consulta',status:'active'}}),
+    request('/api/v1/users/'+b.id,{method:'PATCH',cookie:loginB.cookie,body:{role:'consulta',status:'active'}})
+  ]);
+  assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);
+  assert.equal((await ({n:await db.countAdmins()})).n,1);
+});
 test('anonymous and pending users cannot load the operational app or users API',async t=>{
   const {request,db}=await fixture(t);
   assert.equal((await request('/app.js')).status,401);
   assert.equal((await request('/api/v1/users')).status,401);
   const account={email:'new@example.test',name:'New User',password:'correct-password-123',role:'administrador',status:'active'};
   assert.equal((await request('/api/v1/auth/register',{method:'POST',body:account})).status,202);
-  const stored=db.prepare('SELECT * FROM users WHERE email=?').get(account.email);
+  const stored=(await db.findUser('email',account.email));
   assert.equal(stored.role,'consulta');assert.equal(stored.status,'pending');assert.notEqual(stored.password_hash,account.password);
   const login=await request('/api/v1/auth/login',{method:'POST',body:account});assert.equal(login.status,200);
   assert.match(login.headers.get('set-cookie'),/HttpOnly/);assert.match(login.headers.get('set-cookie'),/SameSite=Lax/);
@@ -65,7 +139,7 @@ test('anonymous and pending users cannot load the operational app or users API',
   assert.equal((await request('/api/v1/users',{cookie:login.cookie})).status,403);
   assert.equal((await request('/api/v1/me',{cookie:login.cookie})).data.user.email,account.email);
   const duplicate=await request('/api/v1/auth/register',{method:'POST',body:account});assert.equal(duplicate.status,202);
-  assert.equal(db.prepare('SELECT count(*) AS n FROM users').get().n,1);
+  assert.equal((await ({n:(await db.listUsers()).length})).n,1);
 });
 test('login validation, CSRF checks, profile persistence, and logout invalidation',async t=>{
   const {request,seed,db}=await fixture(t);const user=await seed('consulta');
@@ -76,7 +150,7 @@ test('login validation, CSRF checks, profile persistence, and logout invalidatio
   const profile={name:'Updated Profile',department:'Operaciones',phone:'5551234567'};
   assert.equal((await request('/api/v1/me',{method:'PATCH',cookie:login.cookie,body:{...profile,role:'administrador'}})).status,400);
   const updated=await request('/api/v1/me',{method:'PATCH',cookie:login.cookie,body:profile});assert.equal(updated.status,200);
-  assert.equal(db.prepare('SELECT department FROM users WHERE id=?').get(user.id).department,'Operaciones');
+  assert.equal((await db.getUser(user.id)).department,'Operaciones');
   assert.equal(updated.data.user.password_hash,undefined);
   assert.equal((await request('/app.js',{cookie:login.cookie})).status,200);
   await request('/api/v1/auth/logout',{method:'POST',cookie:login.cookie,body:{}});
@@ -108,7 +182,7 @@ test('password changes require the current password and invalidate older session
 });
 test('login throttling returns 429 before password verification',async t=>{
   const {request,db}=await fixture(t);
-  db.prepare('INSERT INTO rate_limits VALUES (?,?,?)').run('login-email:'+A.digest('locked@example.test'),10,Date.now()+60000);
+  (await db.saveRateLimit({key:'login-email:'+A.digest('locked@example.test'),count:10,expires_at:Date.now()+60000}));
   assert.equal((await request('/api/v1/auth/login',{method:'POST',body:{email:'locked@example.test',password:'whatever'}})).status,429);
 });
 test('Google disabled state is explicit, not a simulated login',async t=>{
@@ -122,13 +196,57 @@ test('Google flow uses state, nonce, PKCE, and rejects an unbound callback',asyn
   assert.equal(url.origin,'https://accounts.google.com');assert.equal(url.searchParams.get('code_challenge_method'),'S256');
   assert.ok(url.searchParams.get('nonce'));assert.ok(url.searchParams.get('state'));assert.match(start.headers.get('set-cookie'),/HttpOnly/);
   const bad=await request('/api/v1/auth/google/callback?state='+url.searchParams.get('state')+'&code=untrusted');
-  assert.equal(bad.headers.get('location'),'/?auth_error=google_failed');assert.equal(db.prepare('SELECT count(*) AS n FROM users').get().n,0);
+  assert.equal(bad.headers.get('location'),'/?auth_error=google_failed');assert.equal((await ({n:(await db.listUsers()).length})).n,0);
   const cancelled=await request('/api/v1/auth/google/callback?state='+url.searchParams.get('state')+'&error=access_denied',{cookie:start.cookie});
   assert.equal(cancelled.headers.get('location'),'/?auth_error=google_cancelled');
-  assert.equal(db.prepare('SELECT count(*) AS n FROM oauth_states').get().n,0);
+  assert.equal((await ({n:(await db.listOAuth()).length})).n,0);
 });
 test('non-public files cannot be fetched and nonlocal plain HTTP is refused',async t=>{
   const {request}=await fixture(t);
   for(const p of ['/.env','/package.json','/data/nexo.sqlite','/server.cjs','/.git/config'])assert.equal((await request(p)).status,404);
   assert.throws(()=>createApp({database:':memory:',origin:'http://example.com'}),/HTTPS/);
+});
+
+test('Google callback creates a persistent session only after verified identity and respects approval',async t=>{
+  const { OAuth2Client } = require('google-auth-library');
+  const {request,db}=await fixture(t,{googleClientId:'test-client',googleClientSecret:'test-secret'});
+  let claims, expectedVerifier;
+  t.mock.method(OAuth2Client.prototype,'getToken',async input=>{
+    assert.equal(input.codeVerifier,expectedVerifier);
+    assert.equal(input.redirect_uri,ORIGIN+'/api/v1/auth/google/callback');
+    return {tokens:{id_token:'provider-token-stub'}};
+  });
+  t.mock.method(OAuth2Client.prototype,'verifyIdToken',async input=>{
+    assert.deepEqual(input,{idToken:'provider-token-stub',audience:'test-client'});
+    return {getPayload:()=>claims};
+  });
+  for (const approved of [false,true]) {
+    const email=`google-${approved}@example.test`;
+    if(approved)await db.saveApproval({email,role:'compras',approved_by:'test-admin',created_at:new Date().toISOString()});
+    const start=await request('/api/v1/auth/google',{accept:'application/json'});
+    assert.equal(start.status,200);
+    const target=new URL(start.data.url);
+    assert.equal(target.origin,'https://accounts.google.com');
+    const stored=(await db.listOAuth()).find(row=>row.state_hash===A.digest(target.searchParams.get('state')));
+    expectedVerifier=stored.verifier;
+    claims={email,email_verified:true,sub:`google-sub-${approved}`,name:'Google User',nonce:target.searchParams.get('nonce')};
+    const callback='/api/v1/auth/google/callback?state='+target.searchParams.get('state')+'&code=verified-code';
+    const logged=await request(callback,{cookie:start.cookie});
+    assert.equal(logged.headers.get('location'),'/');
+    assert.match(logged.cookie,/nexo_session=/);
+    const me=await request('/api/v1/me',{cookie:logged.cookie});
+    assert.equal(me.status,200);
+    assert.equal(me.data.user.status,approved?'active':'pending');
+    assert.equal(me.data.user.role,approved?'compras':'consulta');
+    assert.equal((await request('/app.js',{cookie:logged.cookie})).status,approved?200:403);
+    const replay=await request(callback,{cookie:start.cookie});
+    assert.equal(replay.headers.get('location'),'/?auth_error=google_failed');
+  }
+  const start=await request('/api/v1/auth/google',{accept:'application/json'});
+  const target=new URL(start.data.url);
+  expectedVerifier=(await db.listOAuth())[0].verifier;
+  claims={email:'invalid@example.test',email_verified:true,sub:'invalid-sub',nonce:'wrong-nonce'};
+  const rejected=await request('/api/v1/auth/google/callback?state='+target.searchParams.get('state')+'&code=code',{cookie:start.cookie});
+  assert.equal(rejected.headers.get('location'),'/?auth_error=google_failed');
+  assert.equal(await db.findUser('email','invalid@example.test'),undefined);
 });

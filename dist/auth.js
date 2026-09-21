@@ -7,7 +7,9 @@
   const initials = name => name.split(/\s+/).slice(0,2).map(n=>n[0]||'').join('').toUpperCase();
   let currentUser = null, authConfig = null, activeTab = 'profile';
   async function api(path,options={}) {
-    const response=await fetch('/api/v1'+path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...options.headers}});
+    let response;
+    try { response=await fetch('/api/v1'+path,{credentials:'same-origin',signal:AbortSignal.timeout(15000),...options,headers:{'Content-Type':'application/json',Accept:'application/json',...options.headers}}); }
+    catch { throw new Error('No se pudo conectar con el servidor. Intenta de nuevo en unos segundos.'); }
     const contentType=response.headers.get('content-type')||'';
     if(!contentType.includes('application/json'))throw new Error('El acceso requiere el servidor de JIDE NOVA CORE. Abre la aplicación desde su servidor, no como archivo estático.');
     const result=await response.json();
@@ -23,7 +25,12 @@
     const register=mode==='register';
     authShell(`<p class="eyebrow">BIENVENIDO A NEXO</p><h2>${register?'Solicita tu cuenta':'Inicia sesión'}</h2><p>${register?'Crea tu perfil. Un administrador revisará tu acceso a JIDE NOVA CORE.':'Accede a tu espacio de trabajo y continúa con tu operación.'}</p><div id="auth-message" class="auth-message" hidden role="alert"></div><button id="google-login" class="google-button" ${authConfig?.googleEnabled?'':'disabled'}><span class="google-letter" aria-hidden="true">G</span>Continuar con Google</button>${authConfig?.googleEnabled?'':'<p class="auth-hint">El acceso con Google todavía no está configurado.</p>'}<div class="auth-divider">o continúa con tu correo</div><form id="login-form" class="auth-form">${register?'<label>Nombre completo<input name="name" autocomplete="name" minlength="2" maxlength="80" required placeholder="Tu nombre y apellidos"></label>':''}<label>Correo electrónico<input name="email" type="email" autocomplete="username" maxlength="254" required placeholder="nombre@empresa.com"></label><label>Contraseña<input name="password" type="password" autocomplete="${register?'new-password':'current-password'}" ${register?'minlength="12"':''} maxlength="128" required placeholder="${register?'Al menos 12 caracteres':'Tu contraseña'}"></label><button type="submit" class="auth-submit">${register?'Solicitar acceso':'Iniciar sesión'}</button></form><div class="auth-switch">${register?'¿Ya tienes una cuenta?':'¿Aún no tienes cuenta?'} <button id="switch-auth">${register?'Inicia sesión':'Solicita acceso'}</button></div>${register?'<p class="auth-hint">Tu rol y acceso son asignados por un administrador. Registrar un correo no verifica su propiedad.</p>':'<p class="auth-hint">Si olvidaste tu contraseña, contacta al administrador. La recuperación por correo aún no está disponible.</p>'}`);
     $('switch-auth').onclick=()=>login(register?'login':'register');
-    $('google-login').onclick=()=>{if(authConfig?.googleEnabled)location.assign('/api/v1/auth/google');};
+    $('google-login').onclick=async event=>{
+      if(!authConfig?.googleEnabled)return;
+      const button=event.currentTarget;button.disabled=true;button.textContent='Conectando con Google…';
+      try { const result=await api('/auth/google');location.assign(result.url); }
+      catch(error){message(error.message);button.disabled=false;button.textContent='Continuar con Google';}
+    };
     $('login-form').onsubmit=async event=>{
       event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;$('auth-message').hidden=true;
       try {
@@ -91,10 +98,10 @@
   async function boot() {
     try {
       authConfig=await api('/auth/config');
-      const errors={google_unavailable:'El acceso con Google aún no está configurado.',google_failed:'No se pudo verificar el acceso con Google. Intenta de nuevo.',google_cancelled:'Se canceló el acceso con Google.',account_exists:'Ya existe una cuenta con ese correo. Accede con tu contraseña; no se vinculó automáticamente a Google.',account_disabled:'Esta cuenta está desactivada. Contacta al administrador.'};
+      const errors={service_unavailable:'No se pudo conectar con Firebase. Contacta al administrador para revisar la conexión del servidor.',too_many_attempts:'Demasiados intentos. Espera unos minutos antes de volver a intentar.',google_unavailable:'El acceso con Google aún no está configurado.',google_failed:'No se pudo verificar el acceso con Google. Intenta de nuevo.',google_cancelled:'Se canceló el acceso con Google.',account_exists:'Ya existe una cuenta con ese correo. Accede con tu contraseña; no se vinculó automáticamente a Google.',account_disabled:'Esta cuenta está desactivada. Contacta al administrador.'};
       const code=new URLSearchParams(location.search).get('auth_error');
       if(code){history.replaceState(null,'','/');login();message(errors[code]||'No se pudo iniciar sesión.');return;}
-      try{currentUser=(await api('/me')).user;await enter();}catch(error){if(error.status===401)login();else throw error;}
+      try{currentUser=(await api('/me')).user;await enter();}catch(error){if(error.status===401)login();else if(error.status===503){login();message(error.message);}else throw error;}
     }catch(error){authShell(`<h2>No se pudo conectar</h2><p>${escape(error.message)}</p><button id="auth-retry" class="auth-submit">Reintentar</button>`);$('auth-retry').onclick=()=>location.reload();}
   }
   boot();
