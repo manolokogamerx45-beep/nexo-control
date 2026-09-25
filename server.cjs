@@ -23,6 +23,8 @@ function createApp(config = {}) {
   const cookies = req => Object.fromEntries(String(req.headers.cookie || '').split(';').map(s=>s.trim().split('=')).filter(a=>a.length===2));
   const json = (res, code, body) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(body)); };
   const redirect = (res, target) => { res.writeHead(302, { Location: target }); res.end(); };
+  const mobileReturn = (state, params) => 'com.jidenova.nexo://auth?' + new URLSearchParams({ state: state.mobile_state, ...params });
+  const googleError = (res, state, code) => redirect(res, state?.mobile_challenge ? mobileReturn(state,{error:code}) : '/?auth_error='+code);
   async function body(req) {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) A.bad('Se requiere JSON.', 415);
     let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 16384) A.bad('Solicitud demasiado grande.', 413); }
@@ -88,13 +90,19 @@ function createApp(config = {}) {
         res.setHeader('Set-Cookie',cookie(cookieName,'',0));return json(res,200,{ok:true});
       }
       if (route==='/api/v1/auth/google' && req.method==='GET') {
+        let mobile = {};
+        if(url.searchParams.get('mobile')==='1') {
+          const challenge=url.searchParams.get('challenge')||'',appState=url.searchParams.get('app_state')||'';
+          if(!/^[A-Za-z0-9_-]{43}$/.test(challenge)||!/^[A-Za-z0-9_-]{43}$/.test(appState))A.bad('Solicitud móvil inválida.');
+          mobile={mobile_challenge:challenge,mobile_state:appState};
+        }
         if (!googleReady) {
           if (req.headers.accept === 'application/json') return json(res,503,{error:'El acceso con Google aún no está configurado.'});
-          return redirect(res,'/?auth_error=google_unavailable');
+          return googleError(res,mobile,'google_unavailable');
         }
         (await A.rateLimit(db,'google:'+req.socket.remoteAddress,30));
         const state=A.secret(),binding=A.secret(),nonce=A.secret(),verifier=A.secret();
-        (await db.saveOAuth({state_hash:A.digest(state),binding_hash:A.digest(binding),nonce:nonce,verifier:verifier,expires_at:Date.now()+600000}));
+        (await db.saveOAuth({state_hash:A.digest(state),binding_hash:A.digest(binding),nonce:nonce,verifier:verifier,expires_at:Date.now()+600000,...mobile}));
         res.setHeader('Set-Cookie',cookie(oauthCookie,binding,600));
         const target=new URL('https://accounts.google.com/o/oauth2/v2/auth');
         target.search=new URLSearchParams({client_id:clientId,redirect_uri:callback,response_type:'code',scope:'openid email profile',state,nonce,prompt:'select_account',code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256'});
@@ -106,7 +114,7 @@ function createApp(config = {}) {
         const state=(await db.consumeOAuth(A.digest(url.searchParams.get('state')||''),A.digest(cookies(req)[oauthCookie]||''),Date.now()));
         res.setHeader('Set-Cookie',cookie(oauthCookie,'',0));
         if (!state || state.expires_at<Date.now() || state.binding_hash!==A.digest(cookies(req)[oauthCookie]||'')) return redirect(res,'/?auth_error=google_failed');
-        if (url.searchParams.has('error') || !url.searchParams.get('code')) return redirect(res,'/?auth_error=google_cancelled');
+        if (url.searchParams.has('error') || !url.searchParams.get('code')) return googleError(res,state,'google_cancelled');
         try {
           const {tokens}=await google.getToken({code:url.searchParams.get('code'),codeVerifier:state.verifier,redirect_uri:callback});
           const ticket=await google.verifyIdToken({idToken:tokens.id_token,audience:clientId});
@@ -116,18 +124,40 @@ function createApp(config = {}) {
           let user=(await db.findUser('google_sub',claims.sub));
           if (!user) {
             // Do not silently link a password account based only on matching email.
-            if ((await db.findUser('email',email))) return redirect(res,'/?auth_error=account_exists');
+            if ((await db.findUser('email',email))) return googleError(res,state,'account_exists');
             const id=randomUUID(), name=String(claims.name||email.split('@')[0]).slice(0,80);
             (await db.createUser({id:id,email:email,name:name,google_sub:claims.sub,created_at:new Date().toISOString()}));
             user=(await db.getUser(id));(await A.audit(db,id,id,'account.google.register'));
           }
-          if(user.status==='disabled')return redirect(res,'/?auth_error=account_disabled');
+          if(user.status==='disabled')return googleError(res,state,'account_disabled');
           user=(await A.applyGoogleApproval(db,user));
+          if(state.mobile_challenge){
+            // The deep link carries a single-use code, never a session credential.
+            const code=A.secret();
+            await db.saveOAuth({state_hash:A.digest(code),binding_hash:A.digest(state.mobile_challenge),kind:'mobile_exchange',user_id:user.id,expires_at:Date.now()+60000});
+            return redirect(res,mobileReturn(state,{code}));
+          }
           (await setSession(req,res,user.id));
           // Clear the transaction cookie as well as setting the new session.
           res.setHeader('Set-Cookie',[res.getHeader('Set-Cookie'),cookie(oauthCookie,'',0)]);
           (await A.audit(db,user.id,user.id,'session.google'));return redirect(res,'/');
-        } catch(error) { return redirect(res,error.status===503?'/?auth_error=service_unavailable':'/?auth_error=google_failed'); }
+        } catch(error) { return googleError(res,state,error.status===503?'service_unavailable':'google_failed'); }
+      }
+      if(route==='/api/v1/auth/mobile/exchange' && req.method==='POST'){
+        await A.rateLimit(db,'mobile-exchange:'+req.socket.remoteAddress,30);
+        const input=await body(req);
+        if(typeof input.code!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(input.code)||typeof input.verifier!=='string'||!/^[A-Za-z0-9_-]{43,128}$/.test(input.verifier))A.bad('Solicitud móvil inválida.');
+        const challenge=createHash('sha256').update(input.verifier).digest('base64url');
+        const user=await db.transaction(async()=>{
+          const state=await db.consumeOAuth(A.digest(input.code),A.digest(challenge),Date.now());
+          if(!state||state.kind!=='mobile_exchange')A.bad('El acceso expiró. Inicia sesión de nuevo.',401);
+          const user=await db.getUser(state.user_id);
+          if(!user||user.status==='disabled')A.bad('La cuenta no está disponible.',401);
+          await setSession(req,res,user.id);
+          await A.audit(db,user.id,user.id,'session.mobile.google');
+          return db.getUser(user.id);
+        });
+        return json(res,200,{user:A.publicUser(user)});
       }
       if (route==='/api/v1/me' && req.method==='GET') return json(res,200,{user:A.publicUser((await authenticate(req)))});
       if (route==='/api/v1/me' && req.method==='PATCH') {

@@ -1,0 +1,192 @@
+{
+  "inventory": [
+    {
+      "id": 1,
+      "name": "Resina epóxica industrial",
+      "sku": "INS-001",
+      "kind": "Insumo",
+      "lot": "LT-2026-084",
+      "qty": 480,
+      "unit": "kg",
+      "warehouse": "Almacén central",
+      "expiry": "2026-09-25",
+      "cost": 145,
+      "min": 100,
+      "supplier": "Polímeros del Centro"
+    },
+    {
+      "id": 2,
+      "name": "Perfil de aluminio 6063",
+      "sku": "INS-002",
+      "kind": "Insumo",
+      "lot": "LT-2026-078",
+      "qty": 1250,
+      "unit": "pzas",
+      "warehouse": "Almacén central",
+      "expiry": null,
+      "cost": 85,
+      "min": 200,
+      "supplier": "Metales del Norte"
+    },
+    {
+      "id": 3,
+      "name": "Soporte modular N-40",
+      "sku": "PT-001",
+      "kind": "Producto terminado",
+      "lot": "LT-2026-091",
+      "qty": 320,
+      "unit": "pzas",
+      "warehouse": "Producto terminado",
+      "expiry": null,
+      "cost": 240,
+      "min": 80,
+      "supplier": "Producción interna"
+    },
+    {
+      "id": 4,
+      "name": "Adhesivo estructural A2",
+      "sku": "INS-003",
+      "kind": "Insumo",
+      "lot": "LT-2026-065",
+      "qty": 24,
+      "unit": "L",
+      "warehouse": "Almacén central",
+      "expiry": "2026-09-22",
+      "cost": 310,
+      "min": 50,
+      "supplier": "Química Industrial MX"
+    },
+    {
+      "id": 5,
+      "name": "Panel compuesto 60 × 120",
+      "sku": "PT-002",
+      "kind": "Producto terminado",
+      "lot": "LT-2026-089",
+      "qty": 180,
+      "unit": "pzas",
+      "warehouse": "Producto terminado",
+      "expiry": null,
+      "cost": 420,
+      "min": 40,
+      "supplier": "Producción interna"
+    },
+    {
+      "id": 6,
+      "name": "Pintura electrostática negra",
+      "sku": "INS-004",
+      "kind": "Insumo",
+      "lot": "LT-2026-082",
+      "qty": 85,
+      "unit": "kg",
+      "warehouse": "Taller de producción",
+      "expiry": "2027-03-12",
+      "cost": 195,
+      "min": 30,
+      "supplier": "Acabados Profesionales"
+    }
+  ],
+  "movements": [
+    {
+      "type": "Entrada",
+      "item": 1,
+      "qty": 120,
+      "date": "18 sep, 09:42",
+      "ref": "OC-2026-042",
+      "reason": "Recepción de compra"
+    },
+    {
+      "type": "Salida",
+      "item": 3,
+      "qty": 40,
+      "date": "18 sep, 09:15",
+      "ref": "DES-2026-018",
+      "reason": "Entrega a cliente"
+    },
+    {
+      "type": "Entrada",
+      "item": 5,
+      "qty": 60,
+      "date": "17 sep, 16:30",
+      "ref": "PROD-2026-012",
+      "reason": "Producción terminada"
+    }
+  ],
+  "wastes": [
+    {
+      "item": 1,
+      "qty": 8,
+      "cause": "Derrame",
+      "date": "17 sep 2026",
+      "note": "Pérdida durante trasvase"
+    },
+    {
+      "item": 6,
+      "qty": 3,
+      "cause": "Daño de empaque",
+      "date": "15 sep 2026",
+      "note": "Saco perforado en almacenamiento"
+    }
+  ],
+  "purchases": [
+    {
+      "id": "OC-2026-042",
+      "supplier": "Polímeros del Centro",
+      "date": "18 sep 2026",
+      "amount": 87000,
+      "status": "Recepción parcial",
+      "item": "Resina epóxica industrial",
+      "ordered": "600 kg",
+      "received": "120 kg"
+    },
+    {
+      "id": "OC-2026-043",
+      "supplier": "Metales del Norte",
+      "date": "21 sep 2026",
+      "amount": 68000,
+      "status": "En tránsito",
+      "item": "Perfil de aluminio 6063",
+      "ordered": "800 pzas",
+      "received": "0 pzas"
+    },
+    {
+      "id": "OC-2026-044",
+      "supplier": "Química Industrial MX",
+      "date": "23 sep 2026",
+      "amount": 31000,
+      "status": "Emitida",
+      "item": "Adhesivo estructural A2",
+      "ordered": "100 L",
+      "received": "0 L"
+    }
+  ],
+  "suppliers": [
+    [
+      "Polímeros del Centro",
+      "Resinas y compuestos",
+      "María González",
+      "compras@polimeros.example",
+      "5 días"
+    ],
+    [
+      "Metales del Norte",
+      "Metales y perfiles",
+      "Carlos Méndez",
+      "ventas@metales.example",
+      "3 días"
+    ],
+    [
+      "Química Industrial MX",
+      "Adhesivos industriales",
+      "Laura Pérez",
+      "contacto@quimica.example",
+      "7 días"
+    ],
+    [
+      "Acabados Profesionales",
+      "Pinturas y acabados",
+      "José Ramírez",
+      "ventas@acabados.example",
+      "4 días"
+    ]
+  ]
+}

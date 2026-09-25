@@ -1,12 +1,29 @@
-# JIDE NOVA CORE · Nexo
+# JIDE NEXO · Control de inventario
 
-Aplicación de inventario con autenticación, perfiles y administración de usuarios. La base de datos online es **Cloud Firestore de Firebase**. El proyecto incluye una configuración Docker para ejecutar el frontend y la API en contenedores independientes. Las pantallas de inventario, compras y movimientos todavía usan datos de demostración en el navegador.
+Aplicación web y móvil para consultar inventario, almacenes, lotes, compras, proveedores, movimientos y mermas. La web utiliza HTML, CSS y JavaScript; la app móvil utiliza **Flutter y Dart**, con Android como primera plataforma. Ambas comparten una API Node.js y **Cloud Firestore de Firebase**. Docker Compose permite ejecutar la web y la API en contenedores independientes.
+
+**Estado actual:** usuarios, perfiles, permisos, sesiones y auditoría tienen persistencia en Firestore. El inventario y las operaciones de almacén siguen usando datos de demostración en ambas interfaces; sus cambios no se sincronizan ni se guardan en la nube.
+
+- [Guía de la app Android: ejecución, instalación y compilación](mobile/README.md)
+- [Revisión de la interfaz web y recomendaciones](docs/interface-review.md)
+- [Comprobaciones automáticas en GitHub Actions](https://github.com/manolokogamerx45-beep/nexo-control/actions)
+
+## Funciones incluidas
+
+| Área | Web | App Flutter |
+| --- | --- | --- |
+| Acceso | Google y contraseña, registro sujeto a aprobación | Google mediante navegador, contraseña y recuperación de sesión |
+| Perfil y permisos | Edición del perfil, administración de usuarios y aprobaciones | Edición del perfil y pantalla de aprobación pendiente; respeta el rol recibido de la API |
+| Inventario | Catálogo y operaciones de demostración | Búsqueda por artículo/SKU/lote, filtros, detalle y movimientos de prueba local |
+| Consultas | Resumen, almacenes, lotes, compras, proveedores y mermas | Las mismas áreas con datos de ejemplo y navegación para teléfono/tableta |
+| Interfaz | Tablas adaptables, menú móvil, navegación por teclado y mejoras de contraste | Material 3 en español, formularios desplazables y navegación adaptable |
 
 ## Tecnologías utilizadas
 
 | Componente | Tecnología y función |
 | --- | --- |
-| Interfaz | HTML, CSS y JavaScript en `dist/` |
+| Interfaz web | HTML, CSS y JavaScript en `dist/` |
+| App móvil | Flutter y Dart en `mobile/`; Android primero |
 | Servidor | Node.js 24 y API HTTP |
 | Base de datos online | Firebase Cloud Firestore: usuarios, perfiles, permisos, sesiones y auditoría |
 | Acceso con Google | OAuth 2.0 y OpenID Connect mediante `google-auth-library` |
@@ -23,7 +40,7 @@ La metodología define cómo se organiza el desarrollo; la arquitectura define c
 | Plataforma | Metodología acordada | Arquitectura | Estado |
 | --- | --- | --- | --- |
 | Web | Iterativa e incremental | Cliente-servidor organizada en capas de presentación, lógica de negocio y acceso a datos | Implementada para autenticación y administración de usuarios; inventario de demostración |
-| Móvil | Mobile-D | MVVM (Model–View–ViewModel), organizada por módulos | Planificada; la aplicación Flutter todavía no está implementada en este repositorio |
+| Móvil | Mobile-D | MVVM (Model–View–ViewModel), organizada por módulos | Primera app Flutter implementada: acceso y perfil por API; inventario de demostración |
 
 ### Web: desarrollo iterativo e incremental
 
@@ -39,9 +56,9 @@ Docker Compose define dos servicios, `web` (Nginx) y `auth-api` (Node.js). La l�
 
 ### Móvil: Mobile-D y MVVM
 
-Se adopta **Mobile-D** para organizar el desarrollo móvil en cinco fases. Su aplicación al proyecto está prevista de la siguiente manera:
+Se adopta **Mobile-D** para organizar el desarrollo móvil en cinco fases. Se aplica por entregas; la primera versión está en [mobile/](mobile/README.md):
 
-| Fase | Trabajo previsto en Nexo |
+| Fase | Trabajo en Nexo |
 | --- | --- |
 | Exploración | Definir usuarios, necesidades, alcance y prioridades de la aplicación móvil |
 | Inicialización | Preparar Flutter y Dart, la estructura MVVM, el entorno de pruebas y la conexión con la API |
@@ -55,20 +72,37 @@ La arquitectura móvil acordada es **MVVM por módulos**, con **Flutter y Dart**
 - **ViewModel:** estado de la pantalla, validaciones de presentación y coordinación de operaciones.
 - **Model y repositorios:** modelos de datos y acceso a la API de Node.js.
 
-La aplicación móvil consumirá el backend compartido, que seguirá aplicando los permisos y accediendo a Firestore. El acceso con Google requerirá configurar los clientes móviles y adaptar la validación y las sesiones del servidor; el flujo web existente no se considera una implementación móvil terminada. Las credenciales privadas de Firestore permanecerán en el servidor.
+La app Flutter consume el backend compartido para acceso y perfil. Google se abre en el navegador del sistema, reutiliza el cliente OAuth web y retorna un código de un solo uso ligado a PKCE. La sesión se guarda en el almacenamiento seguro del teléfono. Los permisos y las credenciales privadas de Firestore permanecen en el servidor. Android es la primera plataforma; la estructura iOS aún requiere compilación y verificación en macOS. Consulta [la guía móvil](mobile/README.md) para ejecutar y compilar.
 
 Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. La persistencia del inventario y los endpoints de negocio necesarios para móvil siguen pendientes.
 
 ## Estado verificado del proyecto
 
-Al 21 de septiembre de 2026:
+Al 24 de septiembre de 2026:
 
 - La ejecución local funciona con Node.js en `http://127.0.0.1:4173/`, conectada a Firestore online.
-- El inicio de sesión real con Google y la conservación de la sesión al recargar fueron verificados.
+- El inicio de sesión real con Google y la conservación de la sesión al recargar fueron verificados en la web. El consentimiento y retorno de Google en el teléfono siguen pendientes de prueba con el usuario.
 - La cuenta del propietario está activa como administrador. Esa asignación se guarda en Firestore, no en el código ni en Git.
 - Docker está configurado; los contenedores no forman parte de la ejecución local verificada. Para utilizarlos, inicia Docker Desktop y sigue los pasos de esta guía.
-- Las 17 pruebas pasaron con el emulador de Firestore. Las pruebas automatizadas de Google simulan la respuesta del proveedor; la comprobación real se realizó en el navegador.
+- Las 18 pruebas del servidor pasaron con el emulador de Firestore. Las pruebas automatizadas de Google simulan la respuesta del proveedor.
+- Flutter pasó el análisis estático y sus 7 pruebas de estado, API y pantallas. Se revisaron anchos de 320, 390 y 840 píxeles con texto ampliado al 150 %.
+- Se generó un APK de desarrollo para Android 7.0 o posterior. La instalación y prueba en el celular del usuario están pendientes. iOS tiene estructura de proyecto, pero requiere compilar y probar en macOS.
 - El inventario sigue usando datos de demostración. Su persistencia en Firestore está pendiente.
+
+## Ejecutar la app Android
+
+Requiere Flutter 3.44.0 / Dart 3.12, Android SDK y un teléfono con depuración USB autorizada o un emulador. Inicia primero la API con `npm start`, una vez configurado Firebase según esta guía. En otra terminal, desde la raíz del repositorio:
+
+```sh
+adb reverse tcp:4173 tcp:4173
+cd mobile
+flutter pub get
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:4173
+```
+
+La conexión USB permite acceder desde el teléfono al servidor local y conserva el callback Google configurado. La API debe permanecer encendida. Para utilizar la app sin depender del equipo se necesita un despliegue HTTPS y configurar su dirección al compilar.
+
+Para generar el instalador de desarrollo, ejecuta `flutter build apk --debug` dentro de `mobile/`. El archivo se crea en `mobile/build/app/outputs/flutter-apk/app-debug.apk`. Los binarios y las carpetas de compilación no se versionan; el flujo **Flutter Android** de GitHub Actions también genera el artefacto `nexo-android-debug` cuando termina correctamente. La firma de publicación y la distribución en Play Store siguen pendientes. Más detalles en [la guía móvil](mobile/README.md).
 
 ## Configurar Firebase
 
@@ -169,6 +203,7 @@ POST   /api/v1/auth/login
 POST   /api/v1/auth/logout
 GET    /api/v1/auth/google
 GET    /api/v1/auth/google/callback
+POST   /api/v1/auth/mobile/exchange
 GET    /api/v1/me
 PATCH  /api/v1/me
 POST   /api/v1/me/password
@@ -183,6 +218,8 @@ El inventario continúa siendo una demostración: sus controles de rol son de in
 
 ## Pruebas
 
+La revisión de la interfaz, los tamaños de pantalla comprobados y las recomendaciones de mejora están documentados en [Revisión de interfaz web](docs/interface-review.md). Se utiliza WCAG 2.2 AA como referencia; la revisión no equivale a una certificación completa de accesibilidad.
+
 ```sh
 npm test
 npm run test:firestore
@@ -192,9 +229,21 @@ El primer comando usa un repositorio en memoria aislado, exclusivo de pruebas. E
 
 Las pruebas cubren acceso anónimo y pendiente, aprobación, suspensión, CSRF, cambios de contraseña, revocación, concurrencia, protección del último administrador y validaciones OAuth. También verifican la creación de sesiones tras un callback válido, el rechazo de estados reutilizados y nonce incorrecto, y que la falta de credenciales de Firebase no cierre el servidor. No llaman al proveedor Google real.
 
+El acceso móvil añade pruebas de canje de código de un solo uso, PKCE, caducidad, concurrencia, cancelación y cuentas suspendidas. Para comprobar Flutter:
+
+```sh
+cd mobile
+flutter pub get
+flutter analyze
+flutter test
+```
+
+El flujo independiente `.github/workflows/mobile.yml` ejecuta estas comprobaciones y compila el APK Android. La revisión visual y las pruebas automatizadas no sustituyen la validación final en un teléfono real.
+
 ## Archivos principales
 
 ```text
+mobile/                   App Flutter Android e iOS (ver guía móvil)
 dist/                     Frontend
 lib/auth.cjs              Contraseñas, sesiones y validaciones
 lib/database.cjs          Repositorio de documentos Firestore

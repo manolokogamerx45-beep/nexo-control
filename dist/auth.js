@@ -18,13 +18,13 @@
   }
   function message(text,success=false,id='auth-message') { const box=$(id);if(box){box.textContent=text;box.className='auth-message'+(success?' success':'');box.hidden=false;} }
   function authShell(content) {
-    $('auth-root').hidden=false;document.querySelector('.shell').hidden=true;
-    $('auth-root').innerHTML=`<div class="auth-layout"><aside class="auth-story"><div class="auth-brand"><span class="brandmark">J</span> JIDE NOVA CORE</div><section><div class="auth-mini">NEXO / CENTRO DE CONTROL</div><h1>El control de tu operación.<br><em>Empieza contigo.</em></h1><p>Inventarios, trazabilidad y abastecimiento en un solo espacio de trabajo.</p><div class="auth-points"><span>01 / Visibilidad</span><span>02 / Trazabilidad</span><span>03 / Control</span></div></section><footer>JIDE NOVA CORE · Gestión empresarial</footer></aside><section class="auth-card-wrap"><div class="auth-card">${content}<div class="auth-footer-note">Acceso exclusivo para usuarios autorizados.</div></div></section></div>`;
+    document.dispatchEvent(new Event('nexo:close-navigation'));$('auth-root').hidden=false;document.querySelector('.shell').hidden=true;document.querySelector('.skip-link').hidden=true;
+    $('auth-root').innerHTML=`<div class="auth-layout"><aside class="auth-story"><div class="auth-brand"><span class="brandmark">J</span> JIDE NOVA CORE</div><section><div class="auth-mini">NEXO / CENTRO DE CONTROL</div><h2>El control de tu operación.<br><em>Empieza contigo.</em></h2><p>Inventarios, trazabilidad y abastecimiento en un solo espacio de trabajo.</p><div class="auth-points"><span>01 / Visibilidad</span><span>02 / Trazabilidad</span><span>03 / Control</span></div></section><footer>JIDE NOVA CORE · Gestión empresarial</footer></aside><main class="auth-card-wrap" id="auth-main"><div class="auth-card">${content.replace(/<h2>/,'<h1>').replace(/<\/h2>/,'</h1>')}<div class="auth-footer-note">Acceso exclusivo para usuarios autorizados.</div></div></main></div>`;
   }
   function login(mode='login') {
     const register=mode==='register';
     authShell(`<p class="eyebrow">BIENVENIDO A NEXO</p><h2>${register?'Solicita tu cuenta':'Inicia sesión'}</h2><p>${register?'Crea tu perfil. Un administrador revisará tu acceso a JIDE NOVA CORE.':'Accede a tu espacio de trabajo y continúa con tu operación.'}</p><div id="auth-message" class="auth-message" hidden role="alert"></div><button id="google-login" class="google-button" ${authConfig?.googleEnabled?'':'disabled'}><span class="google-letter" aria-hidden="true">G</span>Continuar con Google</button>${authConfig?.googleEnabled?'':'<p class="auth-hint">El acceso con Google todavía no está configurado.</p>'}<div class="auth-divider">o continúa con tu correo</div><form id="login-form" class="auth-form">${register?'<label>Nombre completo<input name="name" autocomplete="name" minlength="2" maxlength="80" required placeholder="Tu nombre y apellidos"></label>':''}<label>Correo electrónico<input name="email" type="email" autocomplete="username" maxlength="254" required placeholder="nombre@empresa.com"></label><label>Contraseña<input name="password" type="password" autocomplete="${register?'new-password':'current-password'}" ${register?'minlength="12"':''} maxlength="128" required placeholder="${register?'Al menos 12 caracteres':'Tu contraseña'}"></label><button type="submit" class="auth-submit">${register?'Solicitar acceso':'Iniciar sesión'}</button></form><div class="auth-switch">${register?'¿Ya tienes una cuenta?':'¿Aún no tienes cuenta?'} <button id="switch-auth">${register?'Inicia sesión':'Solicita acceso'}</button></div>${register?'<p class="auth-hint">Tu rol y acceso son asignados por un administrador. Registrar un correo no verifica su propiedad.</p>':'<p class="auth-hint">Si olvidaste tu contraseña, contacta al administrador. La recuperación por correo aún no está disponible.</p>'}`);
-    $('switch-auth').onclick=()=>login(register?'login':'register');
+    $('switch-auth').onclick=()=>{login(register?'login':'register');const title=$('auth-main').querySelector('h1');title.tabIndex=-1;title.focus();window.scrollTo(0,0);};
     $('google-login').onclick=async event=>{
       if(!authConfig?.googleEnabled)return;
       const button=event.currentTarget;button.disabled=true;button.textContent='Conectando con Google…';
@@ -48,9 +48,9 @@
   }
   async function enter() {
     if(currentUser.status!=='active'){pending();return;}
-    $('auth-root').hidden=true;document.querySelector('.shell').hidden=false;
+    $('auth-root').hidden=true;document.querySelector('.shell').hidden=false;document.querySelector('.skip-link').hidden=false;
     if(!document.querySelector('script[data-operational]')) {
-      await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/app.js';script.dataset.operational='true';script.onload=resolve;script.onerror=()=>reject(new Error('No se pudo abrir la aplicación. Inicia sesión de nuevo.'));document.body.append(script);});
+      await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/app.js';script.dataset.operational='true';script.onload=resolve;script.onerror=()=>{script.remove();reject(new Error('No se pudo abrir la aplicación. Inicia sesión de nuevo.'));};document.body.append(script);});
     }
     decorate();
   }
@@ -67,8 +67,8 @@
   async function profileBody(tab) {
     activeTab=tab;
     const dialog=$('profile-dialog');
-    dialog.innerHTML=`<div class="modal-head"><h2>${tab==='users'?'Usuarios y permisos':'Mi perfil'}</h2><button class="icon-btn" id="close-profile" aria-label="Cerrar perfil">×</button></div><div class="profile-tabs"><button data-profile-tab="profile" class="${tab==='profile'?'active':''}">Datos personales</button><button data-profile-tab="security" class="${tab==='security'?'active':''}">Seguridad</button>${currentUser.role==='administrador'?`<button data-profile-tab="users" class="${tab==='users'?'active':''}">Usuarios</button>`:''}</div><div class="modal-body"><div id="profile-message" hidden role="alert"></div><div id="profile-content"></div></div>`;
-    $('close-profile').onclick=()=>dialog.close();dialog.querySelectorAll('[data-profile-tab]').forEach(b=>b.onclick=()=>profileBody(b.dataset.profileTab));
+    dialog.innerHTML=`<div class="modal-head"><h2 id="profile-title">${tab==='users'?'Usuarios y permisos':'Mi perfil'}</h2><button class="icon-btn" id="close-profile" aria-label="Cerrar perfil">×</button></div><div class="profile-tabs" role="group" aria-label="Secciones del perfil"><button data-profile-tab="profile" aria-pressed="${tab==='profile'}" class="${tab==='profile'?'active':''}">Datos personales</button><button data-profile-tab="security" aria-pressed="${tab==='security'}" class="${tab==='security'?'active':''}">Seguridad</button>${currentUser.role==='administrador'?`<button data-profile-tab="users" aria-pressed="${tab==='users'}" class="${tab==='users'?'active':''}">Usuarios</button>`:''}</div><div class="modal-body"><div id="profile-message" hidden role="alert"></div><div id="profile-content"></div></div>`;
+    $('close-profile').onclick=()=>dialog.close();dialog.querySelectorAll('[data-profile-tab]').forEach(b=>b.onclick=async()=>{await profileBody(b.dataset.profileTab);dialog.querySelector('[data-profile-tab="'+activeTab+'"]')?.focus();});
     const container=$('profile-content');
     if(tab==='profile') {
       container.innerHTML=`<div class="profile-meta"><span class="avatar">${escape(initials(currentUser.name))}</span><div><h3>${escape(currentUser.name)}</h3><p class="profile-email">${escape(currentUser.email)}</p><span class="pill">${roles[currentUser.role]}</span></div></div><form id="profile-form" class="auth-form"><label>Nombre completo<input name="name" value="${escape(currentUser.name)}" minlength="2" maxlength="80" required autocomplete="name"></label><div class="form-grid"><label>Departamento<input name="department" value="${escape(currentUser.department)}" maxlength="80" autocomplete="organization-title"></label><label>Teléfono<input name="phone" type="tel" value="${escape(currentUser.phone)}" maxlength="30" autocomplete="tel"></label></div><p class="auth-hint">El correo identifica tu cuenta. Solo un administrador puede cambiar tu rol o estado.</p><button class="auth-submit">Guardar perfil</button></form><div class="auth-switch"><button id="profile-logout">Cerrar sesión</button></div>`;
@@ -92,7 +92,7 @@
       }catch(error){container.textContent='';message(error.message,false,'profile-message');}
     }
   }
-  async function openProfile(){const d=$('profile-dialog');if(!d.open)d.showModal();await profileBody('profile');}
+  async function openProfile(){document.dispatchEvent(new Event('nexo:close-navigation'));const d=$('profile-dialog');await profileBody('profile');if(!d.open)d.showModal();$('close-profile').focus();}
   window.nexoAuth={decorate,can};
   document.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(button&&!can(button.dataset.action)){e.preventDefault();e.stopImmediatePropagation();}},true);
   async function boot() {

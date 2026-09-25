@@ -250,3 +250,56 @@ test('Google callback creates a persistent session only after verified identity 
   assert.equal(rejected.headers.get('location'),'/?auth_error=google_failed');
   assert.equal(await db.findUser('email','invalid@example.test'),undefined);
 });
+
+test('mobile Google returns a PKCE-bound one-use code and preserves account authorization',async t=>{
+  const {OAuth2Client}=require('google-auth-library');
+  const {createHash}=require('node:crypto');
+  const {request,db}=await fixture(t,{googleClientId:'test-client',googleClientSecret:'test-secret'});
+  let claims;
+  t.mock.method(OAuth2Client.prototype,'getToken',async()=>({tokens:{id_token:'verified'}}));
+  t.mock.method(OAuth2Client.prototype,'verifyIdToken',async()=>({getPayload:()=>claims}));
+  const verifier=A.secret(),challenge=createHash('sha256').update(verifier).digest('base64url'),appState=A.secret();
+  const startPath='/api/v1/auth/google?'+new URLSearchParams({mobile:'1',challenge,app_state:appState});
+  async function authorize(email,sub){
+    const start=await request(startPath),provider=new URL(start.headers.get('location'));
+    claims={email,email_verified:true,sub,name:'Mobile User',nonce:provider.searchParams.get('nonce')};
+    const route='/api/v1/auth/google/callback?'+new URLSearchParams({state:provider.searchParams.get('state'),code:'provider-code'});
+    assert.equal((await request(route)).headers.get('location'),'/?auth_error=google_failed');
+    const callback=await request(route,{cookie:start.cookie});
+    const deep=new URL(callback.headers.get('location'));
+    assert.equal(deep.protocol,'com.jidenova.nexo:');assert.equal(deep.hostname,'auth');
+    assert.equal(deep.searchParams.get('state'),appState);
+    assert.equal(deep.searchParams.has('token'),false);
+    assert.doesNotMatch(callback.headers.get('set-cookie'),/nexo_session=/);
+    assert.equal((await request(route,{cookie:start.cookie})).headers.get('location'),'/?auth_error=google_failed');
+    return deep.searchParams.get('code');
+  }
+  const exchange=(code,v=verifier,origin=ORIGIN)=>request('/api/v1/auth/mobile/exchange',{method:'POST',body:{code,verifier:v},origin});
+  const code=await authorize('mobile@example.test','mobile-sub');
+  assert.match(code,/^[A-Za-z0-9_-]{43}$/);
+  assert.equal((await exchange(code,verifier,'https://evil.example')).status,403);
+  assert.equal((await exchange(code,A.secret())).status,401);
+  const logged=await exchange(code);
+  assert.equal(logged.status,200);assert.equal(logged.data.user.status,'pending');
+  assert.equal((await request('/api/v1/me',{cookie:logged.cookie})).data.user.email,'mobile@example.test');
+  assert.equal((await request('/api/v1/users',{cookie:logged.cookie})).status,403);
+  assert.equal((await exchange(code)).status,401);
+  const user=await db.findUser('email','mobile@example.test');
+  await db.updateUser(user.id,{status:'active',role:'almacen'});
+  const activeCode=await authorize('mobile@example.test','mobile-sub');
+  const attempts=await Promise.all([exchange(activeCode),exchange(activeCode)]);
+  assert.deepEqual(attempts.map(r=>r.status).sort(),[200,401]);
+  assert.equal(attempts.find(r=>r.status===200).data.user.role,'almacen');
+  const disabledCode=await authorize('mobile@example.test','mobile-sub');
+  await db.updateUser(user.id,{status:'disabled'});
+  assert.equal((await exchange(disabledCode)).status,401);
+  const expired=A.secret();
+  await db.saveOAuth({state_hash:A.digest(expired),binding_hash:A.digest(challenge),kind:'mobile_exchange',user_id:user.id,expires_at:Date.now()-1});
+  assert.equal((await exchange(expired)).status,401);
+  assert.equal((await exchange('bad')).status,400);
+  const cancelStart=await request(startPath),cancelTarget=new URL(cancelStart.headers.get('location'));
+  const cancelled=await request('/api/v1/auth/google/callback?'+new URLSearchParams({state:cancelTarget.searchParams.get('state'),error:'access_denied'}),{cookie:cancelStart.cookie});
+  const cancelDeep=new URL(cancelled.headers.get('location'));
+  assert.equal(cancelDeep.searchParams.get('error'),'google_cancelled');
+  assert.equal(cancelDeep.searchParams.get('state'),appState);
+});
