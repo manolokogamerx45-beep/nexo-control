@@ -229,7 +229,7 @@ test('Google callback creates a persistent session only after verified identity 
     assert.equal(target.origin,'https://accounts.google.com');
     const stored=(await db.listOAuth()).find(row=>row.state_hash===A.digest(target.searchParams.get('state')));
     expectedVerifier=stored.verifier;
-    claims={email,email_verified:true,sub:`google-sub-${approved}`,name:'Google User',nonce:target.searchParams.get('nonce')};
+    claims={email,email_verified:true,sub:`google-sub-${approved}`,name:'Google User',picture:'https://lh3.googleusercontent.com/a/test-photo',nonce:target.searchParams.get('nonce')};
     const callback='/api/v1/auth/google/callback?state='+target.searchParams.get('state')+'&code=verified-code';
     const logged=await request(callback,{cookie:start.cookie});
     assert.equal(logged.headers.get('location'),'/');
@@ -237,6 +237,7 @@ test('Google callback creates a persistent session only after verified identity 
     const me=await request('/api/v1/me',{cookie:logged.cookie});
     assert.equal(me.status,200);
     assert.equal(me.data.user.status,approved?'active':'pending');
+    assert.equal(me.data.user.picture,claims.picture);
     assert.equal(me.data.user.role,approved?'compras':'consulta');
     assert.equal((await request('/app.js',{cookie:logged.cookie})).status,approved?200:403);
     const replay=await request(callback,{cookie:start.cookie});
@@ -249,6 +250,11 @@ test('Google callback creates a persistent session only after verified identity 
   const rejected=await request('/api/v1/auth/google/callback?state='+target.searchParams.get('state')+'&code=code',{cookie:start.cookie});
   assert.equal(rejected.headers.get('location'),'/?auth_error=google_failed');
   assert.equal(await db.findUser('email','invalid@example.test'),undefined);
+});
+test('profile pictures accept only HTTPS Google image hosts',()=>{
+  assert.equal(A.googlePicture('https://lh3.googleusercontent.com/a/photo'),'https://lh3.googleusercontent.com/a/photo');
+  for(const value of ['https://googleusercontent.com.evil.test/photo','javascript:alert(1)','http://lh3.googleusercontent.com/a','https://user:pass@lh3.googleusercontent.com/a','data:image/png;base64,AA=='])assert.equal(A.googlePicture(value),null);
+  assert.equal(A.publicUser({name:'Local',google_sub:null,picture:'https://lh3.googleusercontent.com/a'}).picture,null);
 });
 
 test('mobile Google returns a PKCE-bound one-use code and preserves account authorization',async t=>{

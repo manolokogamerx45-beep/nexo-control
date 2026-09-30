@@ -5,6 +5,8 @@
   const roles = {administrador:'Administrador',compras:'Compras',almacen:'Almacén',consulta:'Consulta',solicitante:'Solicitante'};
   const statuses = {pending:'Pendiente',active:'Activo',disabled:'Desactivado'};
   const initials = name => name.split(/\s+/).slice(0,2).map(n=>n[0]||'').join('').toUpperCase();
+  const avatarContent = user => user.picture ? '<img class="profile-photo" src="'+escape(user.picture)+'" alt="Foto de '+escape(user.name)+'" referrerpolicy="no-referrer">' : escape(initials(user.name));
+  function photoFallbacks(root=document){root.querySelectorAll('.profile-photo').forEach(img=>{img.onerror=()=>{img.parentElement.textContent=initials(currentUser.name);};});}
   let currentUser = null, authConfig = null, activeTab = 'profile';
   async function api(path,options={}) {
     let response;
@@ -66,10 +68,11 @@
   function can(action){return currentUser?.status==='active'&&(currentUser.role==='administrador'||action==='export'||(['movement','waste'].includes(action)&&currentUser.role==='almacen')||(action==='purchase'&&currentUser.role==='compras'));}
   function decorate() {
     if(!currentUser)return;
-    document.querySelector('.top-right').innerHTML=`<span class="demo"><i></i>Control de almacén</span><button class="user-trigger" id="open-profile" aria-label="Abrir mi perfil"><span class="user-name">${escape(currentUser.name.split(' ')[0])}</span><span class="avatar small">${escape(initials(currentUser.name))}</span></button>`;
+    document.querySelector('.top-right').innerHTML=`<span class="demo"><i></i>Control de almacén</span><button class="user-trigger" id="open-profile" aria-label="Abrir mi perfil"><span class="user-name">${escape(currentUser.name.split(' ')[0])}</span><span class="avatar small">${avatarContent(currentUser)}</span></button>`;
     const profile=document.querySelector('.sidebar-bottom .profile');
-    if(profile){profile.innerHTML=`<span class="avatar">${escape(initials(currentUser.name))}</span><div><strong>${escape(currentUser.name)}</strong><small>${roles[currentUser.role]}</small></div>`;}
+    if(profile){profile.innerHTML=`<span class="avatar">${avatarContent(currentUser)}</span><div><strong>${escape(currentUser.name)}</strong><small>${roles[currentUser.role]}</small></div>`;}
     if(!$('my-profile-link')) {const btn=document.createElement('button');btn.id='my-profile-link';btn.className='nav-item profile-button';btn.textContent='Mi perfil'+(currentUser.role==='administrador'?' y usuarios':'');btn.onclick=()=>openProfile();document.getElementById('navigation').append(btn);}
+    photoFallbacks();
     $('open-profile').onclick=()=>openProfile();
     document.querySelectorAll('[data-action]').forEach(b=>{b.hidden=!can(b.dataset.action);});
   }
@@ -80,7 +83,12 @@
     $('close-profile').onclick=()=>dialog.close();dialog.querySelectorAll('[data-profile-tab]').forEach(b=>b.onclick=async()=>{await profileBody(b.dataset.profileTab);dialog.querySelector('[data-profile-tab="'+activeTab+'"]')?.focus();});
     const container=$('profile-content');
     if(tab==='profile') {
-      container.innerHTML=`<div class="profile-meta"><span class="avatar">${escape(initials(currentUser.name))}</span><div><h3>${escape(currentUser.name)}</h3><p class="profile-email">${escape(currentUser.email)}</p><span class="pill">${roles[currentUser.role]}</span></div></div><form id="profile-form" class="auth-form"><label>Nombre completo<input name="name" value="${escape(currentUser.name)}" minlength="2" maxlength="80" required autocomplete="name"></label><div class="form-grid"><label>Departamento<input name="department" value="${escape(currentUser.department)}" maxlength="80" autocomplete="organization-title"></label><label>Teléfono<input name="phone" type="tel" value="${escape(currentUser.phone)}" maxlength="30" autocomplete="tel"></label></div><p class="auth-hint">El correo identifica tu cuenta. Solo un administrador puede cambiar tu rol o estado.</p><button class="auth-submit">Guardar perfil</button></form><div class="auth-switch"><button id="profile-logout">Cerrar sesión</button></div>`;
+      container.innerHTML=`<div class="profile-meta"><span class="avatar">${avatarContent(currentUser)}</span><div><h3>${escape(currentUser.name)}</h3><p class="profile-email">${escape(currentUser.email)}</p><span class="pill">${roles[currentUser.role]}</span></div></div><form id="profile-form" class="auth-form"><label>Nombre completo<input name="name" value="${escape(currentUser.name)}" minlength="2" maxlength="80" required autocomplete="name"></label><div class="form-grid"><label>Departamento<input name="department" value="${escape(currentUser.department)}" maxlength="80" autocomplete="organization-title"></label><label>Teléfono<input name="phone" type="tel" value="${escape(currentUser.phone)}" maxlength="30" autocomplete="tel"></label></div><p class="auth-hint">El correo identifica tu cuenta. Solo un administrador puede cambiar tu rol o estado.</p><button class="auth-submit">Guardar perfil</button></form><div class="auth-switch"><button id="profile-logout">Cerrar sesión</button></div>`;
+      photoFallbacks(container);
+      if(currentUser.provider==='google'){
+        const refresh=document.createElement('button');refresh.type='button';refresh.className='button';refresh.textContent=currentUser.picture?'Actualizar foto con Google':'Cargar mi foto de Google';
+        refresh.onclick=()=>location.assign('/api/v1/auth/google');container.querySelector('.profile-meta').after(refresh);
+      }
       $('profile-logout').onclick=logout;
       $('profile-form').onsubmit=async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button');button.disabled=true;try{currentUser=(await api('/me',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))})).user;decorate();await profileBody('profile');message('Perfil actualizado.',true,'profile-message');}catch(error){message(error.message,false,'profile-message');}finally{button.disabled=false;}};
     }

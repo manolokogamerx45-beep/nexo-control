@@ -53,13 +53,40 @@
   const partners=kind=>select(kind==='Proveedor'?'Proveedor':'Destinatario','partnerId',state.partners.filter(p=>kind==='Proveedor'?p.kind===kind:p.kind!=='Proveedor').map(p=>[p.id,p.name]));
   const qty=()=>field('Cantidad','quantity','number','1','min="1" step="1"');
   function modal(title,body){$('modal').classList.toggle('wide',body.includes('<table'));$('modal-content').innerHTML=`<div class="modal-head"><h2 id="modal-title">${esc(title)}</h2><button class="icon-btn" data-op="close" aria-label="Cerrar">×</button></div><div class="modal-body">${body}</div>`;$('modal').showModal();}
+  async function prepareLogo(file){
+    if(file.size>5*1024*1024||!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Elige un PNG, JPEG o WebP de hasta 5 MB.');
+    const source=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('No se pudo leer la imagen.'));r.readAsDataURL(file);});
+    const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=()=>reject(Error('El archivo no es una imagen válida.'));i.src=source;});
+    for(const size of [512,384,256,192,128]){
+      const scale=Math.min(1,size/Math.max(img.naturalWidth,img.naturalHeight)),canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+      const result=canvas.toDataURL('image/webp',.85);if(result.length<=45000)return result;
+    }
+    throw Error('No se pudo ajustar la imagen. Prueba con una versión más pequeña.');
+  }
   function form(title,fields,path,method='POST',initial={}){
     initial={_operationId:crypto.randomUUID(),...initial};
     modal(title,`<form id="ops-form" class="auth-form">${fields}<p id="form-error" class="auth-message" role="alert" hidden></p><div class="modal-actions">${button('Cancelar','close')}<button class="button primary" type="submit">Guardar</button></div></form>`);
-    const f=$('ops-form');for(const [key,value] of Object.entries(initial))if(f.elements.namedItem(key))f.elements.namedItem(key).value=value;
+    let logoTask=Promise.resolve(initial.logo||'');
+    const f=$('ops-form');
+    if(path==='/company'){
+      const box=document.createElement('div');box.className='logo-preview';
+      box.innerHTML='<p>Vista previa · pulsa Guardar para aplicar</p><img alt="Vista previa del logo"><span role="status"></span>';
+      f.elements.namedItem('logoFile').parentElement.after(box);
+      const preview=box.querySelector('img'),status=box.querySelector('span');preview.hidden=!initial.logo;if(initial.logo)preview.src=initial.logo;
+      f.elements.namedItem('logoFile').onchange=()=>{
+        const file=f.elements.namedItem('logoFile').files[0];f.elements.namedItem('removeLogo').checked=false;
+        status.textContent=file?'Preparando imagen…':'';
+        const task=file?prepareLogo(file):Promise.resolve(initial.logo||'');logoTask=task;
+        task.then(src=>{if(logoTask!==task)return;preview.hidden=!src;preview.src=src;status.textContent=src?'Imagen lista para guardar.':'';}).catch(error=>{if(logoTask!==task)return;preview.hidden=true;status.textContent=error.message;});
+      };
+      f.elements.namedItem('removeLogo').onchange=e=>{preview.hidden=e.target.checked||!preview.getAttribute('src');};
+    }
+    for(const [key,value] of Object.entries(initial))if(f.elements.namedItem(key))f.elements.namedItem(key).value=value;
     const precision=()=>{const a=article(f.elements.namedItem('articleId')?.value)||article(state.batches.find(b=>b.id===f.elements.namedItem('batchId')?.value)?.articleId);const q=f.elements.namedItem('quantity')||f.elements.namedItem('minimum');if(q&&a){q.step=a.unit==='pzas'?'1':'0.001';q.min=q.name==='minimum'?'0':q.step;}};
     f.elements.namedItem('articleId')?.addEventListener('change',precision);f.elements.namedItem('batchId')?.addEventListener('change',precision);precision();
-    f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('[type="submit"]');b.disabled=true;$('form-error').hidden=true;try{const data={...initial,...Object.fromEntries(new FormData(f))};if('active'in data)data.active=data.active==='true';if(path==='/company'){data.logo=initial.logo||'';const file=f.elements.namedItem('logoFile').files[0];if(file){if(file.size>32768||!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Elige un logo PNG, JPEG o WebP de hasta 32 KB.');data.logo=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('No se pudo leer el logo.'));r.readAsDataURL(file);});}if(f.elements.namedItem('removeLogo').checked)data.logo='';delete data.logoFile;delete data.removeLogo;}await api(path,method,data);$('modal').close();await refresh();toast('Cambios guardados en el servidor.');}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;}finally{b.disabled=false;}};
+    f.onsubmit=async e=>{e.preventDefault();const b=f.querySelector('[type="submit"]');b.disabled=true;$('form-error').hidden=true;try{const data={...initial,...Object.fromEntries(new FormData(f))};if('active'in data)data.active=data.active==='true';if(path==='/company'){data.logo=initial.logo||'';const file=f.elements.namedItem('logoFile').files[0];if(file)data.logo=await logoTask;if(f.elements.namedItem('removeLogo').checked)data.logo='';delete data.logoFile;delete data.removeLogo;}await api(path,method,data);$('modal').close();await refresh();toast('Cambios guardados en el servidor.');}catch(error){$('form-error').textContent=error.message;$('form-error').hidden=false;}finally{b.disabled=false;}};
   }
   function receipt(purchase){form('Recepción de mercancía',articles()+warehouses()+partners('Proveedor')+field('Número de lote','lot')+qty()+`<label class="field">Caducidad (opcional)<input type="date" name="expiry" min="${day()}"></label>`+field('Documento de recepción','reference'),'/receipts','POST',purchase?{purchaseId:purchase.id,articleId:purchase.articleId,partnerId:purchase.partnerId,quantity:(purchase.quantity-purchase.received)/1000,reference:purchase.reference}:{});}
   function exportCSV(){const rows=[['SKU','Artículo','Almacén','Físico','Reservado','Disponible','Unidad'],...state.articles.filter(a=>`${a.sku} ${a.name}`.toLowerCase().includes(query.toLowerCase())).flatMap(a=>state.warehouses.filter(w=>!warehouse||w.id===warehouse).map(w=>{const t=totals(a.id,w.id);return[a.sku,a.name,w.name,t.physical/1000,t.reserved/1000,t.available/1000,a.unit];}))];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='inventario-'+day()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -76,7 +103,7 @@
       if(op==='waste')form('Registrar merma',select('Lote y almacén','batchId',state.batches.filter(b=>b.quantity>b.reserved).map(b=>[b.id,`${article(b.articleId)?.name} · ${b.lot} · ${wh(b.warehouseId)}`]))+qty()+select('Causa','reason',[['Daño','Daño'],['Caducidad','Caducidad'],['Derrame','Derrame'],['Pérdida en almacenamiento','Pérdida en almacenamiento']]),'/waste');
       if(op==='purchase')form('Compra a proveedor',articles()+partners('Proveedor')+qty()+field('Referencia de compra','reference'),'/purchases');
       if(op==='request')form('Solicitud al almacén',articles()+warehouses()+qty()+field('Empresa / punto de venta destinatario','destination')+field('Referencia de la solicitud','reference')+'<p class="note">La solicitud no descuenta inventario. El almacén revisará y reservará la mercancía al aprobarla.</p>','/requests');
-      if(op==='company')form('Nombre y logo del cliente',field('Nombre comercial','name','text',state.company.name)+'<label class="field">Logo (PNG, JPEG o WebP, máximo 32 KB)<input type="file" name="logoFile" accept="image/png,image/jpeg,image/webp"></label><label><input type="checkbox" name="removeLogo"> Quitar logo actual</label>','/company','PATCH',{logo:state.company.logo});
+      if(op==='company')form('Nombre y logo del cliente',field('Nombre comercial','name','text',state.company.name)+'<label class="field">Logo (PNG, JPEG o WebP, máximo 5 MB; ajuste automático)<input type="file" name="logoFile" accept="image/png,image/jpeg,image/webp"></label><label><input type="checkbox" name="removeLogo"> Quitar logo actual</label>','/company','PATCH',{logo:state.company.logo});
       if(['approve','dispatch','receive','cancel'].includes(op)){b.disabled=true;b.dataset.operationId||=crypto.randomUUID();await api('/requests/'+id,'PATCH',{action:op,_operationId:b.dataset.operationId});await refresh();toast('Solicitud actualizada.');}
       if(op==='trace'){const batch=state.batches.find(x=>x.id===id);modal('Trazabilidad · '+batch.lot,`<p>${esc(article(batch.articleId)?.name)} · ${esc(wh(batch.warehouseId))}</p>`+table(['Fecha','Evento','Cantidad','Origen / destino','Responsable / documento'],state.events.filter(x=>x.batchId===id).sort((a,b)=>a.at.localeCompare(b.at)).map(x=>[date(x.at),esc(x.type),number(x.qty),esc(x.destination||partner(x.partnerId)),`${esc(x.actorName)}<br>${esc(x.reference)}`])));}
       if(op==='request-detail'){const r=state.requests.find(x=>x.id===id);modal('Solicitud · '+r.reference,`<p>Destino: ${esc(r.destination)}</p>`+table(['Estado','Fecha','Responsable'],r.history.map(h=>[pill(h.status),date(h.at),esc(h.actor)]))+(state.role!=='solicitante'?table(['Lote reservado / entregado','Cantidad'],r.allocations.map(a=>[esc(state.batches.find(b=>b.id===a.batchId)?.lot),number(a.qty)])):''));}

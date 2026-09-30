@@ -4,7 +4,7 @@ Enfoque: distribuidoras y empresas con almacenes que abastecen a puntos de venta
 
 ## Preparación y recorrido de demostración
 
-1. Administrador: en **Mi empresa**, guardar nombre y logo del cliente (PNG/JPEG/WebP, hasta 32 KB). El nombre y logo aparecen en el panel y en el acceso. El consentimiento de Google conserva la marca configurada en Google Cloud.
+1. Administrador: en **Mi empresa**, guardar nombre y logo del cliente (PNG/JPEG/WebP, hasta 5 MB; ajuste automático y vista previa antes de guardar). El nombre y logo aparecen en el panel y en el acceso. El consentimiento de Google conserva la marca configurada en Google Cloud.
 2. Crear un **Almacén** y registrar proveedor y destinatario en **Empresas y puntos de venta**.
 3. En **Artículos**, crear SKU, nombre, tipo y unidad. Se puede editar nombre o desactivar; SKU y unidad permanecen estables para proteger el historial.
 4. En **Inventario → Configurar mínimo**, definir el mínimo por artículo y almacén. El umbral es editable repitiendo esta acción.

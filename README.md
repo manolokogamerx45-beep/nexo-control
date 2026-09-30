@@ -190,6 +190,12 @@ El botón prepara el acceso mediante la API antes de salir de la página. Si fal
 
 `.env` y los archivos JSON de credenciales son configuración privada de cada entorno. No deben subirse a Git ni copiarse a `dist/`. Clonar el repositorio no transfiere las credenciales ni las cuentas almacenadas en Firebase.
 
+## Logo y foto del perfil
+
+En **Mi empresa → Editar nombre y logo**, selecciona un PNG, JPEG o WebP de hasta 5 MB. La aplicación lo ajusta automáticamente y muestra una vista previa; pulsa **Guardar** para aplicar. La imagen optimizada se conserva en Firestore.
+
+El perfil muestra la foto proporcionada por Google tras un inicio de sesión verificado. Para cuentas existentes, usa **Cargar mi foto de Google**. Si la cuenta no tiene foto o usa contraseña, se muestran iniciales. La foto solo se admite desde HTTPS en los servidores de imágenes de Google.
+
 ## Aprobar usuarios
 
 En **Mi perfil y usuarios → Usuarios → Aprobar un correo**, un administrador puede autorizar anticipadamente un correo y su perfil. La aprobación se consume cuando Google verifica la identidad. Los registros por contraseña requieren revisión manual. No se envían correos ni se crean contraseñas por aprobar una dirección.

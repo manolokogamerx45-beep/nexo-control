@@ -48,7 +48,7 @@ function createApp(config = {}) {
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('X-Frame-Options','DENY');
     res.setHeader('Cache-Control','no-store');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://*.googleusercontent.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     if (secure) res.setHeader('Strict-Transport-Security','max-age=31536000');
     try {
       await db.ready;
@@ -134,6 +134,7 @@ function createApp(config = {}) {
             user=(await db.getUser(id));(await A.audit(db,id,id,'account.google.register'));
           }
           if(user.status==='disabled')return googleError(res,state,'account_disabled');
+          await db.updateUser(user.id,{picture:A.googlePicture(claims.picture)});
           user=(await A.applyGoogleApproval(db,user));
           if(state.mobile_challenge){
             // The deep link carries a single-use code, never a session credential.
