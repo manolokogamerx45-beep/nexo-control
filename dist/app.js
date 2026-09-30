@@ -10,7 +10,7 @@
   const button=(label,op,id='',primary=false)=>`<button type="button" class="button ${primary?'primary':''}" data-op="${op}" data-id="${esc(id)}">${label}</button>`;
   const pill=v=>`<span class="pill ${['Pendiente','Caducado','Stock bajo','Cancelada'].includes(v)?'amber':''}">${esc(v)}</span>`;
   const table=(headers,rows)=>`<section class="panel"><div class="table-scroll" tabindex="0"><table role="table"><thead><tr>${headers.map(h=>`<th role="columnheader" scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(cells=>`<tr role="row">${cells.map((c,i)=>`<td role="cell" data-label="${headers[i]}"><div class="cell-value">${c}</div></td>`).join('')}</tr>`).join(''):`<tr><td colspan="${headers.length}" class="empty">Aún no hay registros. Usa las acciones de esta pantalla para comenzar.</td></tr>`}</tbody></table></div></section>`;
-  async function api(path,method='GET',body){const r=await fetch('/api/v1/operations'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();if(!r.ok)throw Error(data.error||'No se pudo completar la operación.');return data;}
+  async function api(path,method='GET',body){let r;try{r=await fetch('/api/v1/operations'+path,{method,credentials:'same-origin',signal:AbortSignal.timeout(30000),headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});}catch{throw Error('No se pudo conectar con el servidor. Los cambios no se han confirmado; conserva el formulario e intenta de nuevo cuando la conexión esté disponible.');}const data=await r.json();if(!r.ok)throw Error(data.error||'No se pudo completar la operación.');return data;}
   let timer;function toast(msg){clearTimeout(timer);$('toast').textContent=msg;$('toast').classList.add('visible');timer=setTimeout(()=>$('toast').classList.remove('visible'),6000);}
   function totals(a,w){const batches=state.batches.filter(b=>b.articleId===a&&(!w||b.warehouseId===w));return {physical:batches.reduce((s,b)=>s+b.quantity,0),reserved:batches.reduce((s,b)=>s+b.reserved,0),available:batches.reduce((s,b)=>s+(!b.expiry||b.expiry>=day()?b.quantity-b.reserved:0),0)};}
   function branding(){const c=state.company;document.querySelector('.workspace strong').textContent=c.name;document.querySelector('.company-avatar').innerHTML=c.logo?`<img src="${esc(c.logo)}" alt="Logo de ${esc(c.name)}" style="width:100%;height:100%;object-fit:contain">`:esc(c.name.slice(0,1));document.querySelector('.brand').innerHTML=c.logo?`<img src="${esc(c.logo)}" alt="" style="width:38px;height:38px;object-fit:contain"> ${esc(c.name)}`:esc(c.name);document.querySelector('.main-wrap footer').innerHTML=`${esc(c.name)} <span>Inventario guardado en el servidor</span><strong>Tecnología JIDE NOVA CORE · Nexo</strong>`;document.title=(navigation.find(n=>n[0]===route)?.[1]||'Nexo')+' | '+c.name;}
@@ -71,6 +71,7 @@
     let logoTask=Promise.resolve(initial.logo||'');
     const f=$('ops-form');
     if(path==='/company'){
+      f.elements.namedItem('removeLogo').parentElement.hidden=!initial.logo;
       const box=document.createElement('div');box.className='logo-preview';
       box.innerHTML='<p>Vista previa · pulsa Guardar para aplicar</p><img alt="Vista previa del logo"><span role="status"></span>';
       f.elements.namedItem('logoFile').parentElement.after(box);
@@ -81,7 +82,7 @@
         const task=file?prepareLogo(file):Promise.resolve(initial.logo||'');logoTask=task;
         task.then(src=>{if(logoTask!==task)return;preview.hidden=!src;preview.src=src;status.textContent=src?'Imagen lista para guardar.':'';}).catch(error=>{if(logoTask!==task)return;preview.hidden=true;status.textContent=error.message;});
       };
-      f.elements.namedItem('removeLogo').onchange=e=>{preview.hidden=e.target.checked||!preview.getAttribute('src');};
+      f.elements.namedItem('removeLogo').onchange=e=>{preview.hidden=e.target.checked||!preview.getAttribute('src');status.textContent=e.target.checked?'Se quitará el logo al guardar.':'Vista previa restaurada.';};
     }
     for(const [key,value] of Object.entries(initial))if(f.elements.namedItem(key))f.elements.namedItem(key).value=value;
     const precision=()=>{const a=article(f.elements.namedItem('articleId')?.value)||article(state.batches.find(b=>b.id===f.elements.namedItem('batchId')?.value)?.articleId);const q=f.elements.namedItem('quantity')||f.elements.namedItem('minimum');if(q&&a){q.step=a.unit==='pzas'?'1':'0.001';q.min=q.name==='minimum'?'0':q.step;}};
