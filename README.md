@@ -2,7 +2,9 @@
 
 Aplicación web y móvil para consultar inventario, almacenes, lotes, compras, proveedores, movimientos y mermas. La web utiliza HTML, CSS y JavaScript; la app móvil utiliza **Flutter y Dart**, con Android como primera plataforma. Ambas comparten una API Node.js y **Cloud Firestore de Firebase**. Docker Compose permite ejecutar la web y la API en contenedores independientes.
 
-**Estado actual:** usuarios, perfiles, permisos, sesiones y auditoría tienen persistencia en Firestore. El inventario y las operaciones de almacén siguen usando datos de demostración en ambas interfaces; sus cambios no se sincronizan ni se guardan en la nube.
+**Estado actual (29/09/2026):** la web guarda artículos, almacenes, empresas, recepciones, lotes, mínimos, compras, solicitudes, reservas, despachos y mermas en Firestore. Incluye salidas PEPS y trazabilidad hasta el destinatario. El inventario de Flutter aún es demostrativo; su integración con los nuevos endpoints queda pendiente. No se incluyen funciones hospitalarias.
+
+Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 
 - [Guía de la app Android: ejecución, instalación y compilación](mobile/README.md)
 - [Revisión de la interfaz web y recomendaciones](docs/interface-review.md)
@@ -14,8 +16,8 @@ Aplicación web y móvil para consultar inventario, almacenes, lotes, compras, p
 | --- | --- | --- |
 | Acceso | Google y contraseña, registro sujeto a aprobación | Google mediante navegador, contraseña y recuperación de sesión |
 | Perfil y permisos | Edición del perfil, administración de usuarios y aprobaciones | Edición del perfil y pantalla de aprobación pendiente; respeta el rol recibido de la API |
-| Inventario | Catálogo y operaciones de demostración | Búsqueda por artículo/SKU/lote, filtros, detalle y movimientos de prueba local |
-| Consultas | Resumen, almacenes, lotes, compras, proveedores y mermas | Las mismas áreas con datos de ejemplo y navegación para teléfono/tableta |
+| Inventario | Catálogo editable, inventario persistente, mínimos y PEPS | Búsqueda por artículo/SKU/lote, filtros, detalle y movimientos de prueba local |
+| Consultas | Resumen calculado, trazabilidad, solicitudes y compras separadas | Las mismas áreas con datos de ejemplo y navegación para teléfono/tableta |
 | Interfaz | Tablas adaptables, menú móvil, navegación por teclado y mejoras de contraste | Material 3 en español, formularios desplazables y navegación adaptable |
 
 ## Tecnologías utilizadas
@@ -39,7 +41,7 @@ La metodología define cómo se organiza el desarrollo; la arquitectura define c
 
 | Plataforma | Metodología acordada | Arquitectura | Estado |
 | --- | --- | --- | --- |
-| Web | Iterativa e incremental | Cliente-servidor organizada en capas de presentación, lógica de negocio y acceso a datos | Implementada para autenticación y administración de usuarios; inventario de demostración |
+| Web | Iterativa e incremental | Cliente-servidor organizada en capas de presentación, lógica de negocio y acceso a datos | Implementada para autenticación, usuarios e inventario web persistente |
 | Móvil | Mobile-D | MVVM (Model–View–ViewModel), organizada por módulos | Primera app Flutter implementada: acceso y perfil por API; inventario de demostración |
 
 ### Web: desarrollo iterativo e incremental
@@ -74,11 +76,11 @@ La arquitectura móvil acordada es **MVVM por módulos**, con **Flutter y Dart**
 
 La app Flutter consume el backend compartido para acceso y perfil. Google se abre en el navegador del sistema, reutiliza el cliente OAuth web y retorna un código de un solo uso ligado a PKCE. La sesión se guarda en el almacenamiento seguro del teléfono. Los permisos y las credenciales privadas de Firestore permanecen en el servidor. Android es la primera plataforma; la estructura iOS aún requiere compilación y verificación en macOS. Consulta [la guía móvil](mobile/README.md) para ejecutar y compilar.
 
-Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. La persistencia del inventario y los endpoints de negocio necesarios para móvil siguen pendientes.
+Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. Los endpoints de negocio están disponibles bajo `/api/v1/operations`; conectarlos a Flutter sigue pendiente.
 
 ## Estado verificado del proyecto
 
-Al 24 de septiembre de 2026:
+Estado previo al cambio de inventario (24 de septiembre de 2026):
 
 - La ejecución local funciona con Node.js en `http://127.0.0.1:4173/`, conectada a Firestore online.
 - El inicio de sesión real con Google y la conservación de la sesión al recargar fueron verificados en la web. El consentimiento y retorno de Google en el teléfono siguen pendientes de prueba con el usuario.
@@ -87,7 +89,7 @@ Al 24 de septiembre de 2026:
 - Las 18 pruebas del servidor pasaron con el emulador de Firestore. Las pruebas automatizadas de Google simulan la respuesta del proveedor.
 - Flutter pasó el análisis estático y sus 7 pruebas de estado, API y pantallas. Se revisaron anchos de 320, 390 y 840 píxeles con texto ampliado al 150 %.
 - Se generó un APK de desarrollo para Android 7.0 o posterior. La instalación y prueba en el celular del usuario están pendientes. iOS tiene estructura de proyecto, pero requiere compilar y probar en macOS.
-- El inventario sigue usando datos de demostración. Su persistencia en Firestore está pendiente.
+- Desde el 29/09/2026, el inventario web tiene persistencia. Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 
 ## Ejecutar la app Android
 
@@ -194,7 +196,7 @@ En **Mi perfil y usuarios → Usuarios → Aprobar un correo**, un administrador
 
 ## Seguridad y API
 
-Roles: **Administrador, Compras, Almacén y Consulta**. Estados: pendiente, activo y suspendido. Las sesiones usan cookies `HttpOnly`, `SameSite=Lax` y `Secure` con HTTPS, caducan a las 8 horas y se almacenan mediante hashes. Las contraseñas usan scrypt y sal aleatoria. Las escrituras requieren `Origin` igual a `APP_ORIGIN`. Los límites de intentos persisten en Firestore; detrás de Nginx el límite por IP es compartido porque la API no confía en cabeceras de IP arbitrarias.
+Roles: **Administrador, Compras, Almacén, Consulta y Solicitante**. Estados: pendiente, activo y suspendido. Las sesiones usan cookies `HttpOnly`, `SameSite=Lax` y `Secure` con HTTPS, caducan a las 8 horas y se almacenan mediante hashes. Las contraseñas usan scrypt y sal aleatoria. Las escrituras requieren `Origin` igual a `APP_ORIGIN`. Los límites de intentos persisten en Firestore; detrás de Nginx el límite por IP es compartido porque la API no confía en cabeceras de IP arbitrarias.
 
 ```http
 GET    /api/v1/auth/config
@@ -214,7 +216,7 @@ POST   /api/v1/email-approvals
 DELETE /api/v1/email-approvals
 ```
 
-El inventario continúa siendo una demostración: sus controles de rol son de interfaz y los cambios se pierden al recargar. Usuarios, perfiles, aprobaciones y sesiones sí tienen persistencia y autorización en servidor. Cambiar la conexión no importa datos de SQLite o PostgreSQL: conserva tus respaldos si necesitas migrar cuentas anteriores.
+El inventario web y la administración de usuarios tienen persistencia y autorización en servidor. Solicitante ve únicamente sus solicitudes y el catálogo; no puede aprobar ni despachar. El inventario móvil sigue siendo demostrativo. Cambiar la conexión no importa datos de SQLite o PostgreSQL: conserva tus respaldos si necesitas migrar cuentas anteriores.
 
 ## Pruebas
 

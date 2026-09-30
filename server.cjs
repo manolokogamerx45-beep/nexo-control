@@ -12,6 +12,7 @@ function createApp(config = {}) {
   if (!secure && !['127.0.0.1','localhost','[::1]'].includes(parsedOrigin.hostname)) throw new Error('Los despliegues remotos requieren HTTPS.');
   if (process.env.NODE_ENV === 'production' && !secure) throw new Error('APP_ORIGIN debe usar HTTPS en producción.');
   const db = A.openDatabase(config.database || {});
+  const operations = require('./lib/operations.cjs').operations(db);
   const clientId = config.googleClientId ?? process.env.GOOGLE_CLIENT_ID;
   const clientSecret = config.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET;
   const googleReady = !!(clientId && clientSecret);
@@ -27,7 +28,7 @@ function createApp(config = {}) {
   const googleError = (res, state, code) => redirect(res, state?.mobile_challenge ? mobileReturn(state,{error:code}) : '/?auth_error='+code);
   async function body(req) {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) A.bad('Se requiere JSON.', 415);
-    let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 16384) A.bad('Solicitud demasiado grande.', 413); }
+    let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 65536) A.bad('Solicitud demasiado grande.', 413); }
     try { const value = JSON.parse(text); if (!value || typeof value !== 'object' || Array.isArray(value)) A.bad('JSON inválido.'); return value; }
     catch { A.bad('JSON inválido.'); }
   }
@@ -59,7 +60,10 @@ function createApp(config = {}) {
         return json(res,200,{ok:true});
       }
       if (['POST','PATCH','DELETE','PUT'].includes(req.method) && req.headers.origin !== origin) A.bad('Origen de solicitud no permitido.',403);
-      if (route==='/api/v1/auth/config' && req.method==='GET') return json(res,200,{googleEnabled:googleReady,registrationEnabled:true});
+      if (route==='/api/v1/auth/config' && req.method==='GET') {
+        const company=await db.operationGet('settings','company');
+        return json(res,200,{googleEnabled:googleReady,registrationEnabled:true,company:company?{name:company.name,logo:company.logo}:{name:'Mi empresa',logo:''}});
+      }
       if (route==='/api/v1/auth/register' && req.method==='POST') {
         (await A.rateLimit(db,'register:'+req.socket.remoteAddress,5));
         const input=await body(req),email=A.validateEmail(input.email),name=A.validateName(input.name);
@@ -220,6 +224,10 @@ function createApp(config = {}) {
           return json(res,200,{user:A.publicUser((await db.getUser(id)))});
         }
         A.bad('Método no permitido.',405);
+      }
+      if(route.startsWith('/api/v1/operations/')) {
+        const user=await authenticate(req,true);
+        return json(res,200,await operations.handle(user,req.method,route.slice('/api/v1/operations'.length),req.method==='GET'?{}:await body(req)));
       }
       if(route.startsWith('/api/'))A.bad('Endpoint no encontrado.',404);
       if(!['GET','HEAD'].includes(req.method))A.bad('Método no permitido.',405);

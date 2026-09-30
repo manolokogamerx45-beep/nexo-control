@@ -2,7 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const escape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const roles = {administrador:'Administrador',compras:'Compras',almacen:'Almacén',consulta:'Consulta'};
+  const roles = {administrador:'Administrador',compras:'Compras',almacen:'Almacén',consulta:'Consulta',solicitante:'Solicitante'};
   const statuses = {pending:'Pendiente',active:'Activo',disabled:'Desactivado'};
   const initials = name => name.split(/\s+/).slice(0,2).map(n=>n[0]||'').join('').toUpperCase();
   let currentUser = null, authConfig = null, activeTab = 'profile';
@@ -21,9 +21,18 @@
     document.dispatchEvent(new Event('nexo:close-navigation'));$('auth-root').hidden=false;document.querySelector('.shell').hidden=true;document.querySelector('.skip-link').hidden=true;
     $('auth-root').innerHTML=`<div class="auth-layout"><aside class="auth-story"><div class="auth-brand"><span class="brandmark">J</span> JIDE NOVA CORE</div><section><div class="auth-mini">NEXO / CENTRO DE CONTROL</div><h2>El control de tu operación.<br><em>Empieza contigo.</em></h2><p>Inventarios, trazabilidad y abastecimiento en un solo espacio de trabajo.</p><div class="auth-points"><span>01 / Visibilidad</span><span>02 / Trazabilidad</span><span>03 / Control</span></div></section><footer>JIDE NOVA CORE · Gestión empresarial</footer></aside><main class="auth-card-wrap" id="auth-main"><div class="auth-card">${content.replace(/<h2>/,'<h1>').replace(/<\/h2>/,'</h1>')}<div class="auth-footer-note">Acceso exclusivo para usuarios autorizados.</div></div></main></div>`;
   }
+  function brandLogin() {
+    const company=authConfig?.company;
+    if(company){
+      const brand=$('auth-root').querySelector('.auth-brand');
+      if(brand){brand.textContent=company.name;if(company.logo){const img=document.createElement('img');img.src=company.logo;img.alt='';img.style.cssText='width:40px;height:40px;object-fit:contain';brand.prepend(img);}}
+      document.title=company.name+' | Nexo';
+    }
+  }
   function login(mode='login') {
     const register=mode==='register';
     authShell(`<p class="eyebrow">BIENVENIDO A NEXO</p><h2>${register?'Solicita tu cuenta':'Inicia sesión'}</h2><p>${register?'Crea tu perfil. Un administrador revisará tu acceso a JIDE NOVA CORE.':'Accede a tu espacio de trabajo y continúa con tu operación.'}</p><div id="auth-message" class="auth-message" hidden role="alert"></div><button id="google-login" class="google-button" ${authConfig?.googleEnabled?'':'disabled'}><span class="google-letter" aria-hidden="true">G</span>Continuar con Google</button>${authConfig?.googleEnabled?'':'<p class="auth-hint">El acceso con Google todavía no está configurado.</p>'}<div class="auth-divider">o continúa con tu correo</div><form id="login-form" class="auth-form">${register?'<label>Nombre completo<input name="name" autocomplete="name" minlength="2" maxlength="80" required placeholder="Tu nombre y apellidos"></label>':''}<label>Correo electrónico<input name="email" type="email" autocomplete="username" maxlength="254" required placeholder="nombre@empresa.com"></label><label>Contraseña<input name="password" type="password" autocomplete="${register?'new-password':'current-password'}" ${register?'minlength="12"':''} maxlength="128" required placeholder="${register?'Al menos 12 caracteres':'Tu contraseña'}"></label><button type="submit" class="auth-submit">${register?'Solicitar acceso':'Iniciar sesión'}</button></form><div class="auth-switch">${register?'¿Ya tienes una cuenta?':'¿Aún no tienes cuenta?'} <button id="switch-auth">${register?'Inicia sesión':'Solicita acceso'}</button></div>${register?'<p class="auth-hint">Tu rol y acceso son asignados por un administrador. Registrar un correo no verifica su propiedad.</p>':'<p class="auth-hint">Si olvidaste tu contraseña, contacta al administrador. La recuperación por correo aún no está disponible.</p>'}`);
+    brandLogin();
     $('switch-auth').onclick=()=>{login(register?'login':'register');const title=$('auth-main').querySelector('h1');title.tabIndex=-1;title.focus();window.scrollTo(0,0);};
     $('google-login').onclick=async event=>{
       if(!authConfig?.googleEnabled)return;
@@ -57,7 +66,7 @@
   function can(action){return currentUser?.status==='active'&&(currentUser.role==='administrador'||action==='export'||(['movement','waste'].includes(action)&&currentUser.role==='almacen')||(action==='purchase'&&currentUser.role==='compras'));}
   function decorate() {
     if(!currentUser)return;
-    document.querySelector('.top-right').innerHTML=`<span class="demo"><i></i>Inventario de demostración</span><button class="user-trigger" id="open-profile" aria-label="Abrir mi perfil"><span class="user-name">${escape(currentUser.name.split(' ')[0])}</span><span class="avatar small">${escape(initials(currentUser.name))}</span></button>`;
+    document.querySelector('.top-right').innerHTML=`<span class="demo"><i></i>Control de almacén</span><button class="user-trigger" id="open-profile" aria-label="Abrir mi perfil"><span class="user-name">${escape(currentUser.name.split(' ')[0])}</span><span class="avatar small">${escape(initials(currentUser.name))}</span></button>`;
     const profile=document.querySelector('.sidebar-bottom .profile');
     if(profile){profile.innerHTML=`<span class="avatar">${escape(initials(currentUser.name))}</span><div><strong>${escape(currentUser.name)}</strong><small>${roles[currentUser.role]}</small></div>`;}
     if(!$('my-profile-link')) {const btn=document.createElement('button');btn.id='my-profile-link';btn.className='nav-item profile-button';btn.textContent='Mi perfil'+(currentUser.role==='administrador'?' y usuarios':'');btn.onclick=()=>openProfile();document.getElementById('navigation').append(btn);}

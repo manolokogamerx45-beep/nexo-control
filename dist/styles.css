@@ -101,3 +101,7 @@ body:has(dialog[open]),body.menu-open{overflow:hidden}
 .head-actions .date{display:flex}
 @media(max-width:640px){.head-actions .date{width:100%;font-size:.75rem}.cell-value .button{max-width:100%}}
 @media(max-width:850px){.sidebar{transition:none}}
+/* Operational inventory */
+.brand{font-size:22px;letter-spacing:-.6px;overflow-wrap:anywhere}.sidebar{overflow-y:auto}.sidebar-bottom{margin-top:24px}.phase{display:none}.nav-item{min-height:42px}.head-actions{flex-wrap:wrap;justify-content:flex-end}.onboarding{padding:24px;margin-bottom:20px}.onboarding p{line-height:1.7}.panel+.panel{margin-top:20px}td .button{margin:3px}.auth-form .field input{max-width:100%}.modal-body .panel{margin-top:20px}.company-avatar{flex-shrink:0}.brand img{flex-shrink:0}.modal-actions{flex-wrap:wrap}
+@media(max-width:850px){.head-actions{justify-content:flex-start}.table-scroll{max-width:100%}}
+#modal.wide{width:min(960px,calc(100vw - 32px));max-width:960px}.auth-form input[type=checkbox]{width:auto}
