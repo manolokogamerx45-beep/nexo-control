@@ -2,7 +2,7 @@
 
 Aplicación web y móvil para consultar inventario, almacenes, lotes, compras, proveedores, movimientos y mermas. La web utiliza HTML, CSS y JavaScript; la app móvil utiliza **Flutter y Dart**, con Android como primera plataforma. Ambas comparten una API Node.js y **Cloud Firestore de Firebase**. Docker Compose permite ejecutar la web y la API en contenedores independientes.
 
-**Estado actual (29/09/2026):** la web guarda artículos, almacenes, empresas, recepciones, lotes, mínimos, compras, solicitudes, reservas, despachos y mermas en Firestore. Incluye salidas PEPS y trazabilidad hasta el destinatario. El inventario de Flutter aún es demostrativo; su integración con los nuevos endpoints queda pendiente. No se incluyen funciones hospitalarias.
+**Estado actual (05/10/2026):** la web guarda artículos, almacenes, empresas, recepciones, lotes, mínimos, compras de varios artículos con recepciones parciales, solicitudes de varios artículos, reservas, despachos parciales, devoluciones de clientes y a proveedores, transferencias con tránsito y recepción, conteos físicos por lote y mermas en Firestore. El catálogo y las existencias iniciales admiten importación CSV. Incluye salidas PEPS y trazabilidad hasta el destinatario. El inventario de Flutter aún es demostrativo; su integración con los nuevos endpoints queda pendiente. No se incluyen funciones hospitalarias.
 
 Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 
