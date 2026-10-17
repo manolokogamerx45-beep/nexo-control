@@ -3,7 +3,7 @@
 /* Authentication and account dialogs share the operational UI spacing. */
 .auth-story h2{font-size:clamp(32px,4.2vw,62px);line-height:1.15;letter-spacing:-2px;max-width:540px;font-weight:650}
 .auth-story h2 em{color:#c6f36b;font-style:normal}.auth-card h1{font-size:29px;letter-spacing:-1px}
-.auth-card>p,.auth-divider,.auth-switch,.auth-footer-note{color:#56684f}.auth-hint{color:#586d4e!important}
+.auth-card>p,.auth-divider,.auth-switch,.auth-footer-note{color:#56684f}.auth-footer-note a,.auth-hint a{color:#2f6e4c;font-weight:600}.auth-hint{color:#586d4e!important}
 .auth-form input,.auth-form select{border-color:#81937d}.auth-form input:focus-visible,.auth-form select:focus-visible{outline:3px solid #276b42;outline-offset:3px}
 .auth-switch button{min-height:44px}.user-trigger{min-height:44px;min-width:44px;padding:6px;border-radius:8px}.user-trigger:hover{background:#eef4eb}
 .nav-item.profile-button{padding:13px 15px;margin-top:10px;border:1px solid #52665a;color:#dfebdf;min-height:46px}

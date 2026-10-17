@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../privacy/privacy_notice_screen.dart';
 import 'auth_view_model.dart';
 
 class AuthFeedback extends StatelessWidget {
@@ -192,6 +193,17 @@ class _AuthScreenState extends State<AuthScreen> {
                             : null,
                       ),
                       AuthFeedback(auth: auth),
+                      if (registering)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 12),
+                          child: Text(
+                            privacyShortNotice,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF586453),
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 16),
                       FilledButton(
                         onPressed: auth.busy ? null : submit,
@@ -230,6 +242,8 @@ class _AuthScreenState extends State<AuthScreen> {
                           color: Color(0xFF586453),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      const PrivacyNoticeLink(),
                     ],
                   ),
                 ),

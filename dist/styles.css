@@ -56,7 +56,7 @@ td{vertical-align:middle}td .subtitle{font-size:.875rem;margin-top:5px}td strong
 .pill{color:#426326;background:#edf5e6;font-weight:550}.pill.amber{color:#825613;background:#fff3d9}.pill.red{color:#973e37;background:#fceceb}.pill.gray{color:#51636b;background:#edf1f3}
 .table-foot{color:#56695d;gap:12px;flex-wrap:wrap}.table-foot span{min-width:0}
 .warehouse-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.warehouse-number{font-size:clamp(1.5rem,2.6vw,2rem);overflow-wrap:anywhere}.warehouse-card p{color:#5b6e60}.warehouse-card .button{width:100%;margin-top:12px}
-footer{padding-top:24px;color:#586b5e;flex-wrap:wrap;line-height:1.6}
+footer{padding-top:24px;color:#586b5e;flex-wrap:wrap;line-height:1.6}footer a{color:#2f6e4c;font-weight:600}
 dialog{max-height:calc(100dvh - 32px);overflow:auto;border-radius:16px;overscroll-behavior:contain}
 body:has(dialog[open]),body.menu-open{overflow:hidden}
 .modal-head{padding:20px 24px;gap:16px;position:sticky;top:0;background:white;z-index:2}.modal-head h2{min-width:0}.modal-head .icon-btn{flex-shrink:0}
