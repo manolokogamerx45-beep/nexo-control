@@ -148,4 +148,22 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     auth.dispose();
   });
+  testWidgets('privacy notice is reachable before signing up', (tester) async {
+    final auth = AuthViewModel(FakeAuth());
+    await tester.pumpWidget(NexoApp(auth: auth));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Solicitar una cuenta'));
+    await tester.tap(find.text('Solicitar una cuenta'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('No los usamos con fines comerciales'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.text('Aviso de privacidad'));
+    await tester.tap(find.text('Aviso de privacidad'));
+    await tester.pumpAndSettle();
+    expect(find.text('Tus derechos'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    auth.dispose();
+  });
 }

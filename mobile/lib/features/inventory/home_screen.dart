@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../auth/auth_view_model.dart';
 import '../auth/auth_screen.dart';
+import '../privacy/privacy_notice_screen.dart';
 import 'inventory_view_model.dart';
 
 String number(num value) => NumberFormat('#,##0.##', 'es_MX').format(value);
@@ -1016,6 +1017,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   auth.demo ? 'Salir de la demostración' : 'Cerrar sesión',
                 ),
               ),
+              const SizedBox(height: 8),
+              const PrivacyNoticeLink(),
             ],
           ),
         ),
