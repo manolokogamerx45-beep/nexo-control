@@ -44,8 +44,8 @@ class PrivacyNoticeScreen extends StatelessWidget {
           children: [
             section(
               'Responsable',
-              'JIDE NOVA CORE (PENDIENTE: razón social y domicilio) es '
-                  'responsable del tratamiento de tus datos personales.',
+              'JIDE NOVA CORE, S.A. de C.V., con domicilio en Querétaro, '
+                  'México, es responsable del tratamiento de tus datos personales.',
             ),
             section(
               'Datos que tratamos',
@@ -63,14 +63,15 @@ class PrivacyNoticeScreen extends StatelessWidget {
             section(
               'Dónde se guardan',
               'En Cloud Firestore de Google (Firebase), que actúa como '
-                  'encargado. En este teléfono solo se guarda tu sesión, en el '
+                  'encargado, en la región northamerica-south1 (Querétaro, '
+                  'México). En este teléfono solo se guarda tu sesión, en el '
                   'almacenamiento seguro.',
             ),
             section(
               'Tus derechos',
               'Puedes corregir tus datos en Mi perfil. Para acceder, '
                   'cancelar, oponerte o revocar tu consentimiento escribe a '
-                  'PENDIENTE: correo para solicitudes ARCO.',
+                  'privacidad@jidenova.com.',
             ),
             const Text(
               'Consulta el aviso de privacidad integral en la versión web de '
