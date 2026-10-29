@@ -2,7 +2,7 @@
 
 Aplicación web y móvil para consultar inventario, almacenes, lotes, compras, proveedores, movimientos y mermas. La web utiliza HTML, CSS y JavaScript; la app móvil utiliza **Flutter y Dart**, con Android como primera plataforma. Ambas comparten una API Node.js y **Cloud Firestore de Firebase**. Docker Compose permite ejecutar la web y la API en contenedores independientes.
 
-**Estado actual (05/10/2026):** la web guarda artículos, almacenes, empresas, recepciones, lotes, mínimos, compras de varios artículos con recepciones parciales, solicitudes de varios artículos, reservas, despachos parciales, devoluciones de clientes y a proveedores, transferencias con tránsito y recepción, conteos físicos por lote y mermas en Firestore. El catálogo y las existencias iniciales admiten importación CSV. Incluye salidas PEPS y trazabilidad hasta el destinatario. El inventario de Flutter aún es demostrativo; su integración con los nuevos endpoints queda pendiente. No se incluyen funciones hospitalarias.
+**Estado actual (05/10/2026):** la web guarda artículos, almacenes, empresas, recepciones, lotes, mínimos, compras de varios artículos con recepciones parciales, solicitudes de varios artículos, reservas, despachos parciales, devoluciones de clientes y a proveedores, transferencias con tránsito y recepción, conteos físicos por lote y mermas en Firestore. El catálogo y las existencias iniciales admiten importación CSV. Incluye salidas PEPS y trazabilidad hasta el destinatario. Desde el 28/10/2026, Flutter muestra el inventario real en modo de solo lectura; registrar operaciones desde la app queda pendiente. No se incluyen funciones hospitalarias.
 
 Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 
@@ -16,8 +16,8 @@ Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 | --- | --- | --- |
 | Acceso | Google y contraseña, registro sujeto a aprobación | Google mediante navegador, contraseña y recuperación de sesión |
 | Perfil y permisos | Edición del perfil, administración de usuarios y aprobaciones | Edición del perfil y pantalla de aprobación pendiente; respeta el rol recibido de la API |
-| Inventario | Catálogo editable, inventario persistente, mínimos y PEPS | Búsqueda por artículo/SKU/lote, filtros, detalle y movimientos de prueba local |
-| Consultas | Resumen calculado, trazabilidad, solicitudes y compras separadas | Las mismas áreas con datos de ejemplo y navegación para teléfono/tableta |
+| Inventario | Catálogo editable, inventario persistente, mínimos y PEPS | Inventario real de solo lectura: búsqueda por artículo/SKU/lote, filtros, stock bajo y detalle; movimientos de prueba solo en modo visitante |
+| Consultas | Resumen calculado, trazabilidad, solicitudes y compras separadas | Lotes, movimientos, mermas, compras y proveedores desde la API; navegación para teléfono/tableta |
 | Interfaz | Tablas adaptables, menú móvil, navegación por teclado y mejoras de contraste | Material 3 en español, formularios desplazables y navegación adaptable |
 
 ## Tecnologías utilizadas
@@ -76,7 +76,7 @@ La arquitectura móvil acordada es **MVVM por módulos**, con **Flutter y Dart**
 
 La app Flutter consume el backend compartido para acceso y perfil. Google se abre en el navegador del sistema, reutiliza el cliente OAuth web y retorna un código de un solo uso ligado a PKCE. La sesión se guarda en el almacenamiento seguro del teléfono. Los permisos y las credenciales privadas de Firestore permanecen en el servidor. Android es la primera plataforma; la estructura iOS aún requiere compilación y verificación en macOS. Consulta [la guía móvil](mobile/README.md) para ejecutar y compilar.
 
-Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. Los endpoints de negocio están disponibles bajo `/api/v1/operations`; conectarlos a Flutter sigue pendiente.
+Docker se utiliza para los servicios del backend y de la web, no dentro de la aplicación instalada en el teléfono. Los endpoints de negocio están disponibles bajo `/api/v1/operations`; Flutter ya consume `/snapshot` para consultar el inventario y conectar las escrituras sigue pendiente.
 
 ## Estado verificado del proyecto
 
@@ -190,6 +190,12 @@ El botón prepara el acceso mediante la API antes de salir de la página. Si fal
 
 `.env` y los archivos JSON de credenciales son configuración privada de cada entorno. No deben subirse a Git ni copiarse a `dist/`. Clonar el repositorio no transfiere las credenciales ni las cuentas almacenadas en Firebase.
 
+## Instalar la web como app (PWA)
+
+La web es una Progressive Web App: incluye `manifest.webmanifest`, íconos en `dist/icons/` y el service worker `dist/sw.js`, registrado desde `auth.js` porque la CSP no permite scripts en línea. En Chrome o Edge aparece **Instalar Nexo** en la barra de direcciones; en Android, **Menú → Instalar app**; en iPhone, Safari **Compartir → Agregar a inicio**. Se abre en su propia ventana, con ícono y sin barra del navegador.
+
+Los navegadores solo permiten instalarla desde `http://127.0.0.1`/`localhost` o con **HTTPS**; en producción se requiere el dominio con certificado. Sin conexión se muestra `offline.html`. El service worker solo almacena archivos públicos (estilos, `auth.js`, íconos, manifiesto); nunca guarda respuestas de `/api/` ni `app.js`, por lo que el inventario y las sesiones no quedan en el dispositivo y registrar movimientos requiere internet. Al modificar los archivos del shell, incrementa `CACHE` en `sw.js` para retirar la versión anterior.
+
 ## Logo y foto del perfil
 
 En **Mi empresa → Editar nombre y logo**, selecciona un PNG, JPEG o WebP de hasta 5 MB. La aplicación lo ajusta automáticamente y muestra una vista previa; pulsa **Guardar** para aplicar. La imagen optimizada se conserva en Firestore.
@@ -222,7 +228,7 @@ POST   /api/v1/email-approvals
 DELETE /api/v1/email-approvals
 ```
 
-El inventario web y la administración de usuarios tienen persistencia y autorización en servidor. Solicitante ve únicamente sus solicitudes y el catálogo; no puede aprobar ni despachar. El inventario móvil sigue siendo demostrativo. Cambiar la conexión no importa datos de SQLite o PostgreSQL: conserva tus respaldos si necesitas migrar cuentas anteriores.
+El inventario web y la administración de usuarios tienen persistencia y autorización en servidor. Solicitante ve únicamente sus solicitudes y el catálogo; no puede aprobar ni despachar. El inventario móvil consulta los datos reales; sus escrituras siguen pendientes. Cambiar la conexión no importa datos de SQLite o PostgreSQL: conserva tus respaldos si necesitas migrar cuentas anteriores.
 
 ## Pruebas
 
@@ -252,7 +258,7 @@ El flujo independiente `.github/workflows/mobile.yml` ejecuta estas comprobacion
 
 ```text
 mobile/                   App Flutter Android e iOS (ver guía móvil)
-dist/                     Frontend
+dist/                     Frontend y PWA (manifest.webmanifest, sw.js, offline.html, icons/)
 lib/auth.cjs              Contraseñas, sesiones y validaciones
 lib/database.cjs          Repositorio de documentos Firestore
 server.cjs                API HTTP
