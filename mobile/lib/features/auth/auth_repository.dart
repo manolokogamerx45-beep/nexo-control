@@ -36,6 +36,7 @@ class AppUser {
         'compras': 'Compras',
         'almacen': 'Almacén',
         'consulta': 'Consulta',
+        'solicitante': 'Solicitante',
       }[role] ??
       role;
 }
