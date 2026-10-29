@@ -1,5 +1,7 @@
 (() => {
   'use strict';
+  // Installable PWA; the worker only caches the public shell (see sw.js).
+  if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
   const $ = id => document.getElementById(id);
   const escape = value => String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const roles = {administrador:'Administrador',compras:'Compras',almacen:'Almacén',consulta:'Consulta',solicitante:'Solicitante'};

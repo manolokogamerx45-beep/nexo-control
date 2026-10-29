@@ -232,13 +232,14 @@ function createApp(config = {}) {
       }
       if(route.startsWith('/api/'))A.bad('Endpoint no encontrado.',404);
       if(!['GET','HEAD'].includes(req.method))A.bad('Método no permitido.',405);
-      const allowed={'/':'index.html','/index.html':'index.html','/styles.css':'styles.css','/auth.css':'auth.css','/auth.js':'auth.js','/app.js':'app.js','/aviso-privacidad':'aviso-privacidad.html','/aviso-privacidad.html':'aviso-privacidad.html'};
+      const allowed={'/':'index.html','/index.html':'index.html','/styles.css':'styles.css','/auth.css':'auth.css','/auth.js':'auth.js','/app.js':'app.js','/aviso-privacidad':'aviso-privacidad.html','/aviso-privacidad.html':'aviso-privacidad.html',
+        '/manifest.webmanifest':'manifest.webmanifest','/sw.js':'sw.js','/offline.html':'offline.html','/icons/icon-192.png':'icons/icon-192.png','/icons/icon-512.png':'icons/icon-512.png','/icons/icon-maskable-512.png':'icons/icon-maskable-512.png','/icons/apple-touch-icon.png':'icons/apple-touch-icon.png'};
       if(!allowed[route])A.bad('Archivo no encontrado.',404);
       // The operational bundle is never delivered to anonymous or pending users.
       if(route==='/app.js')(await authenticate(req,true));
       const filename=allowed[route],content=fs.readFileSync(path.join(__dirname,'dist',filename));
-      const type=filename.endsWith('.css')?'text/css':filename.endsWith('.js')?'text/javascript':'text/html';
-      res.writeHead(200,{'Content-Type':type+'; charset=utf-8'});res.end(req.method==='HEAD'?undefined:content);
+      const type=filename.endsWith('.png')?'image/png':filename.endsWith('.webmanifest')?'application/manifest+json; charset=utf-8':(filename.endsWith('.css')?'text/css':filename.endsWith('.js')?'text/javascript':'text/html')+'; charset=utf-8';
+      res.writeHead(200,{'Content-Type':type});res.end(req.method==='HEAD'?undefined:content);
     } catch(error) {
       const route = new URL(req.url, origin).pathname;
       if (req.method==='GET' && ['/api/v1/auth/google','/api/v1/auth/google/callback'].includes(route) && req.headers.accept !== 'application/json') {

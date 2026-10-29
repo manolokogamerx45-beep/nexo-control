@@ -15,6 +15,7 @@ CMD ["node", "server.cjs"]
 
 FROM nginx:stable-alpine AS web
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY dist/index.html dist/aviso-privacidad.html dist/styles.css dist/auth.css dist/auth.js /usr/share/nginx/html/
+COPY dist/index.html dist/aviso-privacidad.html dist/offline.html dist/styles.css dist/auth.css dist/auth.js dist/sw.js dist/manifest.webmanifest /usr/share/nginx/html/
+COPY dist/icons /usr/share/nginx/html/icons
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1:8080/health/web || exit 1
