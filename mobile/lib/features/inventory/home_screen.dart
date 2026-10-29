@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../core/api_client.dart';
 import '../auth/auth_view_model.dart';
 import '../auth/auth_screen.dart';
 import '../privacy/privacy_notice_screen.dart';
@@ -49,7 +50,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => MovementForm(stock: stock),
+      builder: (_) => stock.live
+          ? LiveMovementForm(stock: stock)
+          : MovementForm(stock: stock),
     );
   }
 
@@ -64,8 +67,10 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  const DemoNotice(),
-                  const SizedBox(height: 20),
+                  if (!stock.live) ...[
+                    const DemoNotice(),
+                    const SizedBox(height: 20),
+                  ],
                   content(),
                 ],
               ),
@@ -104,8 +109,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 100,
               ),
               children: [
-                const DemoNotice(),
-                const SizedBox(height: 24),
+                if (!stock.live) ...[
+                  const DemoNotice(),
+                  const SizedBox(height: 24),
+                ],
                 if (page == 0) dashboard(),
                 if (page == 1) inventory(),
                 if (page == 2) movementList(),
@@ -127,6 +134,12 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           actions: [
+            if (stock.live)
+              IconButton(
+                tooltip: 'Actualizar',
+                onPressed: stock.loading ? null : stock.load,
+                icon: const Icon(Icons.refresh),
+              ),
             IconButton(
               tooltip: 'Mi perfil',
               onPressed: () => Navigator.of(context).push(
@@ -206,7 +219,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ? FloatingActionButton.extended(
                 onPressed: record,
                 icon: const Icon(Icons.add),
-                label: const Text('Movimiento de prueba'),
+                label: Text(
+                  stock.live ? 'Registrar movimiento' : 'Movimiento de prueba',
+                ),
               )
             : null,
       );
@@ -237,39 +252,41 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       const SizedBox(height: 22),
-      Card(
-        color: const Color(0xFF244D40),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'VALOR DEL INVENTARIO · MXN',
-                style: TextStyle(
-                  color: Color(0xFFD6ED95),
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
+      // Real batches carry no unit cost yet, so the value is demo-only.
+      if (!stock.live)
+        Card(
+          color: const Color(0xFF244D40),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'VALOR DEL INVENTARIO · MXN',
+                  style: TextStyle(
+                    color: Color(0xFFD6ED95),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                money(stock.totalValue),
-                style: const TextStyle(
-                  fontSize: 36,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+                const SizedBox(height: 10),
+                Text(
+                  money(stock.totalValue),
+                  style: const TextStyle(
+                    fontSize: 36,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Estimación con costos de ejemplo',
-                style: TextStyle(color: Colors.white),
-              ),
-            ],
+                const SizedBox(height: 12),
+                const Text(
+                  'Estimación con costos de ejemplo',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
       Wrap(
         spacing: 12,
         runSpacing: 12,
@@ -463,12 +480,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ...{
             'SKU': item.text('sku'),
             'Lote': item.text('lot'),
-            'Existencias': '${number(item.quantity)} ${item.text('unit')}',
-            'Mínimo': '${number(item.minimum)} ${item.text('unit')}',
+            stock.live ? 'Disponible' : 'Existencias':
+                '${number(item.quantity)} ${item.text('unit')}',
+            if (stock.live) ...{
+              'Físico':
+                  '${number(item.data['physical'] as num)} ${item.text('unit')}',
+              'Reservado':
+                  '${number(item.data['reserved'] as num)} ${item.text('unit')}',
+            },
+            'Mínimo': item.minimum == null
+                ? 'Sin configurar'
+                : '${number(item.minimum!)} ${item.text('unit')}',
             'Almacén': item.text('warehouse'),
             'Caducidad': item.text('expiry'),
             'Proveedor': item.text('supplier'),
-            'Costo unitario': '${money(item.data['cost'] as num)} MXN',
+            if (item.cost != null) 'Costo unitario': '${money(item.cost!)} MXN',
           }.entries.map(
             (e) => Padding(
               padding: const EdgeInsets.only(bottom: 16),
@@ -484,8 +510,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const DemoNotice(),
-          const SizedBox(height: 16),
+          if (!stock.live) ...[const DemoNotice(), const SizedBox(height: 16)],
           FilledButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cerrar'),
@@ -495,8 +520,8 @@ class _HomeScreenState extends State<HomeScreen> {
     ),
   );
   Widget movementCard(Map<String, dynamic> row) {
-    final item = stock.item(row['item'] as int),
-        incoming = row['type'] == 'Entrada';
+    final item = stock.item(row['item'].toString()),
+        incoming = row['incoming'] as bool? ?? row['type'] == 'Entrada';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -548,6 +573,8 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: EdgeInsets.only(bottom: 16),
           child: Text('Tu perfil tiene acceso de consulta.'),
         ),
+      if (stock.movements.isEmpty)
+        empty('Sin movimientos.', 'Aún no hay operaciones registradas.'),
       ...stock.movements.map(movementCard),
     ],
   );
@@ -589,27 +616,26 @@ class _HomeScreenState extends State<HomeScreen> {
         () => openPage(
           'Lotes y caducidades',
           () => Column(
-            children: stock.items
-                .map(
-                  (i) => Card(
-                    child: ListTile(
-                      title: Text(i.text('lot')),
-                      subtitle: Text(
-                        '${i.name}\nCaducidad: ${i.text('expiry')}',
-                      ),
-                      isThreeLine: true,
-                      onTap: () => detail(i),
-                    ),
+            children: stock.lots.map((lot) {
+              final i = stock.item(lot['item'].toString());
+              return Card(
+                child: ListTile(
+                  title: Text('${lot['lot']}'),
+                  subtitle: Text(
+                    '${i.name} · ${number(lot['qty'] as num)} ${i.text('unit')}\n${i.text('warehouse')} · Caducidad: ${lot['expiry'] ?? 'Sin caducidad'}',
                   ),
-                )
-                .toList(),
+                  isThreeLine: true,
+                  onTap: () => detail(i),
+                ),
+              );
+            }).toList(),
           ),
         ),
       ),
       menu(
         Icons.shopping_bag_outlined,
         'Compras',
-        '${stock.purchases.length} órdenes de ejemplo',
+        '${stock.purchases.length} ${stock.live ? 'órdenes' : 'órdenes de ejemplo'}',
         () => openPage(
           'Compras',
           () => Column(
@@ -627,12 +653,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           Text(p['supplier'] as String),
                           const SizedBox(height: 12),
-                          Text(
-                            '${p['item']}\nPedido: ${p['ordered']} · Recibido: ${p['received']}',
-                          ),
+                          Text(p['lines'] as String),
                           const SizedBox(height: 8),
                           Text(
-                            '${money(p['amount'] as num)} MXN · ${p['status']}',
+                            [
+                              if (p['amount'] != null)
+                                '${money(p['amount'] as num)} MXN',
+                              p['date'],
+                              p['status'],
+                            ].join(' · '),
                           ),
                         ],
                       ),
@@ -646,7 +675,7 @@ class _HomeScreenState extends State<HomeScreen> {
       menu(
         Icons.handshake_outlined,
         'Proveedores',
-        '${stock.suppliers.length} contactos de ejemplo',
+        '${stock.suppliers.length} ${stock.live ? 'contactos' : 'contactos de ejemplo'}',
         () => openPage(
           'Proveedores',
           () => Column(
@@ -659,15 +688,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            s[0] as String,
+                            s['name'] as String,
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          Text(s[1] as String),
+                          Text(s['category'] as String),
                           const SizedBox(height: 12),
-                          Text('${s[2]}\n${s[3]}\nEntrega estimada: ${s[4]}'),
+                          Text(s['detail'] as String),
                         ],
                       ),
                     ),
@@ -688,9 +717,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 .map(
                   (w) => Card(
                     child: ListTile(
-                      title: Text(stock.item(w['item'] as int).name),
+                      title: Text(stock.item(w['item'].toString()).name),
                       subtitle: Text(
-                        '${number(w['qty'] as num)} ${stock.item(w['item'] as int).text('unit')} · ${w['cause']}\n${w['date']}',
+                        '${number(w['qty'] as num)} ${stock.item(w['item'].toString()).text('unit')} · ${w['cause']}\n${w['date']}',
                       ),
                       isThreeLine: true,
                     ),
@@ -772,7 +801,7 @@ class _MovementFormState extends State<MovementForm> {
   final form = GlobalKey<FormState>(),
       quantity = TextEditingController(),
       reason = TextEditingController();
-  late int id = widget.stock.items.first.id;
+  late String id = widget.stock.items.first.id;
   String type = 'Entrada';
   String? error;
   @override
@@ -831,7 +860,7 @@ class _MovementFormState extends State<MovementForm> {
             onChanged: (v) => setState(() => type = v!),
           ),
           const SizedBox(height: 16),
-          DropdownButtonFormField<int>(
+          DropdownButtonFormField<String>(
             initialValue: id,
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'Artículo'),
@@ -883,6 +912,356 @@ class _MovementFormState extends State<MovementForm> {
           FilledButton(onPressed: save, child: const Text('Registrar prueba')),
           TextButton(
             onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Registers receipts, FIFO issues and waste against the shared API.
+class LiveMovementForm extends StatefulWidget {
+  const LiveMovementForm({super.key, required this.stock});
+  final InventoryViewModel stock;
+  @override
+  State<LiveMovementForm> createState() => _LiveMovementFormState();
+}
+
+class _LiveMovementFormState extends State<LiveMovementForm> {
+  final form = GlobalKey<FormState>(),
+      quantity = TextEditingController(),
+      lot = TextEditingController(),
+      reference = TextEditingController(),
+      reason = TextEditingController();
+  final operationId = InventoryViewModel.newOperationId();
+  String type = 'Entrada';
+  String? articleId, warehouseId, partnerId, itemId, batchId, error;
+  DateTime? expiry;
+  bool busy = false;
+
+  InventoryViewModel get stock => widget.stock;
+  List<Map<String, dynamic>> get suppliers =>
+      stock.catalogPartners.where((p) => p['kind'] == 'Proveedor').toList();
+  List<Map<String, dynamic>> get customers =>
+      stock.catalogPartners.where((p) => p['kind'] != 'Proveedor').toList();
+  List<StockItem> get issuable =>
+      stock.items.where((e) => e.quantity > 0).toList();
+  List<Map<String, dynamic>> get wasteable =>
+      stock.lots.where((l) => ((l['wasteable'] as num?) ?? 0) > 0).toList();
+
+  String get unit => switch (type) {
+    'Entrada' =>
+      stock.catalogArticles.firstWhere(
+            (a) => a['id'] == articleId,
+            orElse: () => const {'unit': ''},
+          )['unit']
+          as String,
+    'Salida' => itemId == null ? '' : stock.item(itemId!).text('unit'),
+    _ =>
+      batchId == null
+          ? ''
+          : stock
+                .item(
+                  stock.lots
+                      .firstWhere((l) => l['batchId'] == batchId)['item']
+                      .toString(),
+                )
+                .text('unit'),
+  };
+
+  num? get limit => switch (type) {
+    'Salida' => itemId == null ? null : stock.item(itemId!).quantity,
+    'Merma' =>
+      batchId == null
+          ? null
+          : stock.lots.firstWhere((l) => l['batchId'] == batchId)['wasteable']
+                as num,
+    _ => null,
+  };
+
+  /// What is still missing in the web before this movement can be registered.
+  String? get missing => switch (type) {
+    'Entrada' when stock.catalogArticles.isEmpty =>
+      'Primero da de alta un artículo en la web.',
+    'Entrada' when stock.catalogWarehouses.isEmpty =>
+      'Primero crea un almacén en la web.',
+    'Entrada' when suppliers.isEmpty =>
+      'Primero registra un proveedor en la web.',
+    'Salida' when issuable.isEmpty => 'No hay existencias disponibles.',
+    'Salida' when customers.isEmpty =>
+      'Primero registra un cliente o punto de venta en la web.',
+    'Merma' when wasteable.isEmpty => 'No hay lotes con existencias libres.',
+    _ => null,
+  };
+
+  @override
+  void dispose() {
+    for (final c in [quantity, lot, reference, reason]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  String? validateQuantity(String? value) {
+    final text = (value ?? '').trim().replaceAll(',', '.');
+    if (!RegExp(r'^\d+(\.\d{1,3})?$').hasMatch(text) ||
+        double.parse(text) <= 0) {
+      return 'Escribe una cantidad mayor que cero, con hasta 3 decimales.';
+    }
+    if (unit == 'pzas' && text.contains('.')) {
+      return 'Las piezas requieren cantidades enteras.';
+    }
+    if (limit != null && double.parse(text) > limit!) {
+      return 'Supera lo disponible (${number(limit!)} $unit).';
+    }
+    return null;
+  }
+
+  Future<void> save() async {
+    if (!form.currentState!.validate()) return;
+    final amount = quantity.text.trim().replaceAll(',', '.');
+    final (path, data) = switch (type) {
+      'Entrada' => (
+        '/receipts',
+        {
+          'articleId': articleId,
+          'warehouseId': warehouseId,
+          'partnerId': partnerId,
+          'quantity': amount,
+          'lot': lot.text.trim(),
+          'reference': reference.text.trim(),
+          if (expiry != null)
+            'expiry': DateFormat('yyyy-MM-dd').format(expiry!),
+        },
+      ),
+      'Salida' => (
+        '/issues',
+        {
+          'articleId': stock.item(itemId!).data['articleId'],
+          'warehouseId': stock.item(itemId!).data['warehouseId'],
+          'partnerId': partnerId,
+          'quantity': amount,
+          'reference': reference.text.trim(),
+        },
+      ),
+      _ => (
+        '/waste',
+        {'batchId': batchId, 'quantity': amount, 'reason': reason.text.trim()},
+      ),
+    };
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await stock.submit(path, data, operationId);
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(
+        SnackBar(content: Text('$type registrada correctamente.')),
+      );
+    } on ApiException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Widget select(
+    String label,
+    String? value,
+    List<(String, String)> options,
+    ValueChanged<String?> onChanged,
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 16),
+    child: DropdownButtonFormField<String>(
+      key: ValueKey('$type-$label'),
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [
+        for (final (id, text) in options)
+          DropdownMenuItem(
+            value: id,
+            child: Text(text, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: busy ? null : onChanged,
+      validator: (v) => v == null ? 'Selecciona una opción.' : null,
+    ),
+  );
+
+  Widget field(
+    TextEditingController controller,
+    String label, {
+    int max = 80,
+    int min = 1,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: TextFormField(
+      controller: controller,
+      enabled: !busy,
+      maxLength: max,
+      decoration: InputDecoration(labelText: label),
+      validator: (v) =>
+          (v?.trim().length ?? 0) < min ? 'Completa este campo.' : null,
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+    padding: EdgeInsets.fromLTRB(
+      24,
+      24,
+      24,
+      MediaQuery.viewInsetsOf(context).bottom + 32,
+    ),
+    child: Form(
+      key: form,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Registrar movimiento',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          const SizedBox(height: 20),
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'Entrada', label: Text('Entrada')),
+              ButtonSegment(value: 'Salida', label: Text('Salida')),
+              ButtonSegment(value: 'Merma', label: Text('Merma')),
+            ],
+            selected: {type},
+            onSelectionChanged: busy
+                ? null
+                : (s) => setState(() {
+                    type = s.first;
+                    partnerId = null;
+                    error = null;
+                  }),
+          ),
+          const SizedBox(height: 20),
+          if (missing != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(missing!),
+            )
+          else ...[
+            if (type == 'Entrada') ...[
+              select('Artículo', articleId, [
+                for (final a in stock.catalogArticles)
+                  (a['id'] as String, '${a['sku']} · ${a['name']}'),
+              ], (v) => setState(() => articleId = v)),
+              select('Almacén', warehouseId, [
+                for (final w in stock.catalogWarehouses)
+                  (w['id'] as String, w['name'] as String),
+              ], (v) => setState(() => warehouseId = v)),
+              select('Proveedor', partnerId, [
+                for (final p in suppliers)
+                  (p['id'] as String, p['name'] as String),
+              ], (v) => setState(() => partnerId = v)),
+            ],
+            if (type == 'Salida') ...[
+              select('Artículo y almacén', itemId, [
+                for (final i in issuable)
+                  (
+                    i.id,
+                    '${i.name} · ${i.text('warehouse')} (${number(i.quantity)} ${i.text('unit')})',
+                  ),
+              ], (v) => setState(() => itemId = v)),
+              select(
+                'Cliente o punto de venta',
+                partnerId,
+                [
+                  for (final p in customers)
+                    (p['id'] as String, '${p['name']} · ${p['kind']}'),
+                ],
+                (v) => setState(() => partnerId = v),
+              ),
+            ],
+            if (type == 'Merma')
+              select('Lote', batchId, [
+                for (final l in wasteable)
+                  (
+                    l['batchId'] as String,
+                    '${l['lot']} · ${stock.item(l['item'].toString()).name} (${number(l['wasteable'] as num)})',
+                  ),
+              ], (v) => setState(() => batchId = v)),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: TextFormField(
+                controller: quantity,
+                enabled: !busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: unit.isEmpty ? 'Cantidad' : 'Cantidad ($unit)',
+                  helperText: limit == null
+                      ? null
+                      : 'Disponible: ${number(limit!)} $unit',
+                ),
+                validator: validateQuantity,
+              ),
+            ),
+            if (type == 'Entrada') ...[
+              field(lot, 'Lote', max: 60),
+              field(reference, 'Documento de recepción (factura, remisión)'),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: OutlinedButton.icon(
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final today = DateTime.now();
+                          final picked = await showDatePicker(
+                            context: context,
+                            firstDate: today,
+                            lastDate: DateTime(today.year + 20),
+                            initialDate: expiry ?? today,
+                            helpText: 'Fecha de caducidad',
+                          );
+                          if (picked != null) setState(() => expiry = picked);
+                        },
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    expiry == null
+                        ? 'Caducidad (opcional)'
+                        : 'Caduca: ${DateFormat('dd/MM/yyyy').format(expiry!)}',
+                  ),
+                ),
+              ),
+            ],
+            if (type == 'Salida')
+              field(reference, 'Referencia (remisión, pedido)'),
+            if (type == 'Merma')
+              field(reason, 'Causa de la merma', max: 200, min: 3),
+          ],
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            ),
+          FilledButton(
+            onPressed: busy || missing != null ? null : save,
+            child: busy
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text('Registrar ${type.toLowerCase()}'),
+          ),
+          TextButton(
+            onPressed: busy ? null : () => Navigator.pop(context),
             child: const Text('Cancelar'),
           ),
         ],

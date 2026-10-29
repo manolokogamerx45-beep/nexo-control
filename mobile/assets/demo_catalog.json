@@ -134,9 +134,7 @@
       "date": "18 sep 2026",
       "amount": 87000,
       "status": "Recepción parcial",
-      "item": "Resina epóxica industrial",
-      "ordered": "600 kg",
-      "received": "120 kg"
+      "lines": "Resina epóxica industrial\nPedido: 600 kg · Recibido: 120 kg"
     },
     {
       "id": "OC-2026-043",
@@ -144,9 +142,7 @@
       "date": "21 sep 2026",
       "amount": 68000,
       "status": "En tránsito",
-      "item": "Perfil de aluminio 6063",
-      "ordered": "800 pzas",
-      "received": "0 pzas"
+      "lines": "Perfil de aluminio 6063\nPedido: 800 pzas · Recibido: 0 pzas"
     },
     {
       "id": "OC-2026-044",
@@ -154,39 +150,29 @@
       "date": "23 sep 2026",
       "amount": 31000,
       "status": "Emitida",
-      "item": "Adhesivo estructural A2",
-      "ordered": "100 L",
-      "received": "0 L"
+      "lines": "Adhesivo estructural A2\nPedido: 100 L · Recibido: 0 L"
     }
   ],
   "suppliers": [
-    [
-      "Polímeros del Centro",
-      "Resinas y compuestos",
-      "María González",
-      "compras@polimeros.example",
-      "5 días"
-    ],
-    [
-      "Metales del Norte",
-      "Metales y perfiles",
-      "Carlos Méndez",
-      "ventas@metales.example",
-      "3 días"
-    ],
-    [
-      "Química Industrial MX",
-      "Adhesivos industriales",
-      "Laura Pérez",
-      "contacto@quimica.example",
-      "7 días"
-    ],
-    [
-      "Acabados Profesionales",
-      "Pinturas y acabados",
-      "José Ramírez",
-      "ventas@acabados.example",
-      "4 días"
-    ]
+    {
+      "name": "Polímeros del Centro",
+      "category": "Resinas y compuestos",
+      "detail": "María González\ncompras@polimeros.example\nEntrega estimada: 5 días"
+    },
+    {
+      "name": "Metales del Norte",
+      "category": "Metales y perfiles",
+      "detail": "Carlos Méndez\nventas@metales.example\nEntrega estimada: 3 días"
+    },
+    {
+      "name": "Química Industrial MX",
+      "category": "Adhesivos industriales",
+      "detail": "Laura Pérez\ncontacto@quimica.example\nEntrega estimada: 7 días"
+    },
+    {
+      "name": "Acabados Profesionales",
+      "category": "Pinturas y acabados",
+      "detail": "José Ramírez\nventas@acabados.example\nEntrega estimada: 4 días"
+    }
   ]
 }

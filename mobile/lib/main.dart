@@ -16,7 +16,7 @@ void main() {
         defaultValue: 'http://127.0.0.1:4173',
       ),
     );
-    runApp(NexoApp(auth: AuthViewModel(ServerAuthRepository(api))));
+    runApp(NexoApp(auth: AuthViewModel(ServerAuthRepository(api)), api: api));
   } on ApiException catch (e) {
     runApp(
       MaterialApp(
@@ -36,8 +36,14 @@ void main() {
 }
 
 class NexoApp extends StatefulWidget {
-  const NexoApp({super.key, required this.auth, this.inventoryRepository});
+  const NexoApp({
+    super.key,
+    required this.auth,
+    this.api,
+    this.inventoryRepository,
+  });
   final AuthViewModel auth;
+  final ApiClient? api;
   final InventoryRepository? inventoryRepository;
   @override
   State<NexoApp> createState() => _NexoAppState();
@@ -121,7 +127,11 @@ class _NexoAppState extends State<NexoApp> {
         return HomeScreen(
           key: ValueKey(auth.demo ? 'demo' : auth.user!.id),
           auth: auth,
-          repository: widget.inventoryRepository ?? DemoInventoryRepository(),
+          repository:
+              widget.inventoryRepository ??
+              (auth.demo || widget.api == null
+                  ? DemoInventoryRepository()
+                  : ApiInventoryRepository(widget.api!)),
         );
       },
     ),
