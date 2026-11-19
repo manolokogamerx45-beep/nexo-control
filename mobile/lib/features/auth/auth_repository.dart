@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import '../../core/api_client.dart';
+import '../../core/offline_store.dart';
 
 class AppUser {
   const AppUser({
@@ -52,7 +53,7 @@ abstract class AuthRepository {
 }
 
 class ServerAuthRepository implements AuthRepository {
-  ServerAuthRepository(this.api, {FlutterSecureStorage? storage})
+  ServerAuthRepository(this.api, {FlutterSecureStorage? storage, this.offline})
     : storage = storage ?? const FlutterSecureStorage() {
     api.onSession = (value) async {
       if (value == null) {
@@ -64,9 +65,17 @@ class ServerAuthRepository implements AuthRepository {
   }
   final ApiClient api;
   final FlutterSecureStorage storage;
+
+  /// Remembers the last signed-in user so the app opens without internet.
+  final OfflineStore? offline;
   String get _key => 'nexo.session.${Uri.parse(api.baseUrl).origin}';
-  AppUser _user(Map<String, dynamic> data) =>
-      AppUser.fromJson(data['user'] as Map<String, dynamic>);
+  AppUser _user(Map<String, dynamic> data) {
+    final json = data['user'] as Map<String, dynamic>;
+    final user = AppUser.fromJson(json);
+    offline?.writeUser(json);
+    return user;
+  }
+
   @override
   Future<AppUser?> restore() async {
     api.sessionCookie = await storage.read(key: _key);
@@ -74,7 +83,15 @@ class ServerAuthRepository implements AuthRepository {
     try {
       return await refresh();
     } on ApiException catch (e) {
-      if (e.status == 401) return null;
+      if (e.status == 401) {
+        await offline?.writeUser(null);
+        return null;
+      }
+      // No connection: keep working with the last known account and role.
+      if (e.status == 0 && offline != null) {
+        final cached = await offline!.readUser();
+        if (cached != null) return AppUser.fromJson(cached);
+      }
       rethrow;
     }
   }
@@ -119,9 +136,14 @@ class ServerAuthRepository implements AuthRepository {
   );
   @override
   Future<void> logout() async {
-    await api.request('/auth/logout', method: 'POST', data: {});
+    try {
+      await api.request('/auth/logout', method: 'POST', data: {});
+    } on ApiException {
+      // Offline: the local session is removed anyway; the server one expires.
+    }
     api.sessionCookie = null;
     await storage.delete(key: _key);
+    await offline?.writeUser(null);
   }
 
   String _secret() => base64UrlEncode(

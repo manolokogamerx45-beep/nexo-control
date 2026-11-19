@@ -6,6 +6,8 @@ import 'features/auth/auth_view_model.dart';
 import 'features/auth/auth_screen.dart';
 import 'features/inventory/inventory_view_model.dart';
 import 'features/inventory/home_screen.dart';
+import 'features/ops/ops_home.dart';
+import 'core/offline_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +18,14 @@ void main() {
         defaultValue: 'http://127.0.0.1:4173',
       ),
     );
-    runApp(NexoApp(auth: AuthViewModel(ServerAuthRepository(api)), api: api));
+    final store = SecureOfflineStore(scope: Uri.parse(api.baseUrl).host);
+    runApp(
+      NexoApp(
+        auth: AuthViewModel(ServerAuthRepository(api, offline: store)),
+        api: api,
+        store: store,
+      ),
+    );
   } on ApiException catch (e) {
     runApp(
       MaterialApp(
@@ -40,10 +49,12 @@ class NexoApp extends StatefulWidget {
     super.key,
     required this.auth,
     this.api,
+    this.store,
     this.inventoryRepository,
   });
   final AuthViewModel auth;
   final ApiClient? api;
+  final OfflineStore? store;
   final InventoryRepository? inventoryRepository;
   @override
   State<NexoApp> createState() => _NexoAppState();
@@ -124,6 +135,18 @@ class _NexoAppState extends State<NexoApp> {
         }
         if (!auth.demo && auth.user == null) return AuthScreen(auth: auth);
         if (!auth.demo && !auth.user!.active) return PendingScreen(auth: auth);
+        // Signed-in users get the full workspace (offline-capable); the demo
+        // and tests that inject their own repository keep the simple screen.
+        if (!auth.demo &&
+            widget.api != null &&
+            widget.inventoryRepository == null) {
+          return OpsHome(
+            key: ValueKey(auth.user!.id),
+            auth: auth,
+            api: widget.api!,
+            store: widget.store ?? MemoryOfflineStore(),
+          );
+        }
         return HomeScreen(
           key: ValueKey(auth.demo ? 'demo' : auth.user!.id),
           auth: auth,

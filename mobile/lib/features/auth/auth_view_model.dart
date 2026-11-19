@@ -58,6 +58,16 @@ class AuthViewModel extends ChangeNotifier {
     user = null;
     demo = false;
   });
+
+  /// The server no longer accepts the session (expired or revoked).
+  void sessionExpired() {
+    if (user == null) return;
+    user = null;
+    error =
+        'Tu sesión expiró. Inicia sesión de nuevo; tus operaciones sin enviar se conservan.';
+    notifyListeners();
+  }
+
   void explore() {
     if (busy) return;
     demo = true;

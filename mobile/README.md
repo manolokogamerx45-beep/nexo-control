@@ -10,7 +10,7 @@ Aplicación nativa Flutter para Android, con estructura iOS preparada. Primera e
 - Entradas, salidas y mermas de **prueba local**, con validación de cantidades. Administrador y Almacén ven estos controles; las cuentas de consulta solo consultan. El modo visitante permite explorar la demostración sin crear una cuenta.
 - Interfaz Material 3 en español, formularios desplazables, navegación inferior en teléfonos y lateral en tabletas.
 
-**Con sesión iniciada, el inventario es real y de solo lectura.** La app lee `GET /api/v1/operations/snapshot`, el mismo inventario que guarda la web en Firestore: existencias disponibles, físicas y reservadas por artículo y almacén, mínimos, lotes, movimientos, mermas, compras y proveedores. El botón **Actualizar** vuelve a consultarlo. Registrar entradas, salidas o mermas desde la app sigue pendiente; esos controles solo aparecen en el **modo visitante**, que conserva el catálogo de demostración y cambios locales que se pierden al salir. La app no contiene claves privadas de Firebase ni un administrador predefinido.
+**Con sesión iniciada, la app hace lo mismo que la web** (según tu perfil): recepciones, salidas PEPS, transferencias, conteos, mermas, devoluciones, compras, solicitudes, catálogo, importación de CSV pegando el contenido, indicadores con gráficas y administración de usuarios. Se adapta de teléfono a escritorio (barra inferior y menú lateral, o panel fijo en pantallas anchas) y **funciona sin internet**: muestra la última copia descargada y guarda lo que registres en una cola cifrada que se envía al reconectar. El logo de la empresa se cambia solo desde la web. El modo visitante conserva el catálogo de demostración.
 
 ## Android local
 
