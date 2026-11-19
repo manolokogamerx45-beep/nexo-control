@@ -26,6 +26,9 @@ function createApp(config = {}) {
   const redirect = (res, target) => { res.writeHead(302, { Location: target }); res.end(); };
   const mobileReturn = (state, params) => 'com.jidenova.nexo://auth?' + new URLSearchParams({ state: state.mobile_state, ...params });
   const googleError = (res, state, code) => redirect(res, state?.mobile_challenge ? mobileReturn(state,{error:code}) : '/?auth_error='+code);
+  // Behind Vercel every connection comes from its proxy; only there trust its client-IP header.
+  const trustProxy = process.env.VERCEL === '1' || process.env.TRUST_PROXY === '1';
+  const clientIp = req => (trustProxy && String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress;
   async function body(req) {
     if (!String(req.headers['content-type'] || '').startsWith('application/json')) A.bad('Se requiere JSON.', 415);
     let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 65536) A.bad('Solicitud demasiado grande.', 413); }
@@ -65,7 +68,7 @@ function createApp(config = {}) {
         return json(res,200,{googleEnabled:googleReady,registrationEnabled:true,company:company?{name:company.name,logo:company.logo}:{name:'Mi empresa',logo:''}});
       }
       if (route==='/api/v1/auth/register' && req.method==='POST') {
-        (await A.rateLimit(db,'register:'+req.socket.remoteAddress,5));
+        (await A.rateLimit(db,'register:'+clientIp(req),5));
         const input=await body(req),email=A.validateEmail(input.email),name=A.validateName(input.name);
         const password=await A.hashPassword(input.password);
         // Never disclose whether the address already has an account.
@@ -78,7 +81,7 @@ function createApp(config = {}) {
       }
       if (route==='/api/v1/auth/login' && req.method==='POST') {
         const input=await body(req),email=A.emailOf(input.email);
-        (await A.rateLimit(db,'login-ip:'+req.socket.remoteAddress,30)); (await A.rateLimit(db,'login-email:'+A.digest(email),10));
+        (await A.rateLimit(db,'login-ip:'+clientIp(req),30)); (await A.rateLimit(db,'login-email:'+A.digest(email),10));
         const user=(await db.findUser('email',email));
         if (!await A.verifyPassword(input.password,user?.password_hash) || user.status==='disabled') A.bad('Correo o contraseña incorrectos.',401);
         await db.transaction(async () => {
@@ -104,7 +107,7 @@ function createApp(config = {}) {
           if (req.headers.accept === 'application/json') return json(res,503,{error:'El acceso con Google aún no está configurado.'});
           return googleError(res,mobile,'google_unavailable');
         }
-        (await A.rateLimit(db,'google:'+req.socket.remoteAddress,30));
+        (await A.rateLimit(db,'google:'+clientIp(req),30));
         const state=A.secret(),binding=A.secret(),nonce=A.secret(),verifier=A.secret();
         (await db.saveOAuth({state_hash:A.digest(state),binding_hash:A.digest(binding),nonce:nonce,verifier:verifier,expires_at:Date.now()+600000,...mobile}));
         res.setHeader('Set-Cookie',cookie(oauthCookie,binding,600));
@@ -149,7 +152,7 @@ function createApp(config = {}) {
         } catch(error) { return googleError(res,state,error.status===503?'service_unavailable':'google_failed'); }
       }
       if(route==='/api/v1/auth/mobile/exchange' && req.method==='POST'){
-        await A.rateLimit(db,'mobile-exchange:'+req.socket.remoteAddress,30);
+        await A.rateLimit(db,'mobile-exchange:'+clientIp(req),30);
         const input=await body(req);
         if(typeof input.code!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(input.code)||typeof input.verifier!=='string'||!/^[A-Za-z0-9_-]{43,128}$/.test(input.verifier))A.bad('Solicitud móvil inválida.');
         const challenge=createHash('sha256').update(input.verifier).digest('base64url');

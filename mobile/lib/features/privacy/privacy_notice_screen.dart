@@ -64,7 +64,9 @@ class PrivacyNoticeScreen extends StatelessWidget {
               'Dónde se guardan',
               'En Cloud Firestore de Google (Firebase), que actúa como '
                   'encargado, en la región northamerica-south1 (Querétaro, '
-                  'México). En este teléfono solo se guarda tu sesión, en el '
+                  'México). La app se comunica con un servidor alojado en '
+                  'Vercel (Estados Unidos), que también actúa como encargado '
+                  'y solo transmite tus solicitudes. En este teléfono solo se guarda tu sesión, en el '
                   'almacenamiento seguro.',
             ),
             section(

@@ -259,7 +259,10 @@ void main() {
     await tester.ensureVisible(find.text('Aviso de privacidad'));
     await tester.tap(find.text('Aviso de privacidad'));
     await tester.pumpAndSettle();
+    // The notice is a long lazy list: scroll to the section that must be there.
+    await tester.scrollUntilVisible(find.text('Tus derechos'), 200);
     expect(find.text('Tus derechos'), findsOneWidget);
+    expect(find.textContaining('Vercel'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     auth.dispose();
   });
