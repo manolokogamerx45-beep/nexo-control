@@ -3,8 +3,9 @@
   const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const number=v=>new Intl.NumberFormat('es-MX',{maximumFractionDigits:3}).format(v/1000);
   const date=v=>v?new Date(v).toLocaleString('es-MX'):'—',day=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  let state,route='overview',query='',warehouse='',page=0,loadVersion=0;
-  const navigation=[['overview','Resumen'],['inventory','Inventario'],['articles','Artículos'],['requests','Solicitudes de abastecimiento'],['lots','Lotes y trazabilidad'],['movements','Movimientos'],['transfers','Transferencias'],['returns','Devoluciones'],['waste','Mermas'],['purchases','Compras a proveedores'],['partners','Empresas y puntos de venta'],['warehouses','Almacenes'],['company','Mi empresa']];
+  const offline={on:false,syncedAt:0,queue:[],loaded:false,flushing:false,notice:false};
+  let state,route='overview',query='',warehouse='',page=0,loadVersion=0,metricsData=null,metricsMonths=6,metricsError='',metricsVersion=0;
+  const navigation=[['overview','Resumen'],['metrics','Indicadores'],['inventory','Inventario'],['articles','Artículos'],['requests','Solicitudes de abastecimiento'],['lots','Lotes y trazabilidad'],['movements','Movimientos'],['transfers','Transferencias'],['returns','Devoluciones'],['waste','Mermas'],['purchases','Compras a proveedores'],['partners','Empresas y puntos de venta'],['warehouses','Almacenes'],['company','Mi empresa']];
   const allow=(...roles)=>state?.role==='administrador'||roles.includes(state?.role);
   const article=id=>state.articles.find(x=>x.id===id),wh=id=>state.warehouses.find(x=>x.id===id)?.name||'—',partner=id=>state.partners.find(x=>x.id===id)?.name||'—';
   const requestItems=r=>Array.isArray(r.items)?r.items:[{articleId:r.articleId,quantity:r.quantity,allocations:r.allocations||[]}];
@@ -13,8 +14,63 @@
   const button=(label,op,id='',primary=false)=>`<button type="button" class="button ${primary?'primary':''}" data-op="${op}" data-id="${esc(id)}">${label}</button>`;
   const pill=v=>`<span class="pill ${['Pendiente','Caducado','Stock bajo','Cancelada'].includes(v)?'amber':''}">${esc(v)}</span>`;
   const table=(headers,rows)=>`<section class="panel"><div class="table-scroll" tabindex="0"><table role="table"><thead><tr>${headers.map(h=>`<th role="columnheader" scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(cells=>`<tr role="row">${cells.map((c,i)=>`<td role="cell" data-label="${headers[i]}"><div class="cell-value">${c}</div></td>`).join('')}</tr>`).join(''):`<tr><td colspan="${headers.length}" class="empty">Aún no hay registros. Usa las acciones de esta pantalla para comenzar.</td></tr>`}</tbody></table></div></section>`;
-  async function api(path,method='GET',body){let r;try{r=await fetch('/api/v1/operations'+path,{method,credentials:'same-origin',signal:AbortSignal.timeout(30000),headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});}catch{throw Error('No se pudo conectar con el servidor. Los cambios no se han confirmado; conserva el formulario e intenta de nuevo cuando la conexión esté disponible.');}const data=await r.json();if(!r.ok)throw Error(data.error||'No se pudo completar la operación.');return data;}
-  let timer;function toast(msg){clearTimeout(timer);$('toast').textContent=msg;$('toast').classList.add('visible');timer=setTimeout(()=>$('toast').classList.remove('visible'),6000);}
+  const idb=window.nexoOffline,me=()=>window.nexoAuth?.user()?.id||'';
+  async function request(path,method,body){
+    let r;
+    try{r=await fetch('/api/v1/operations'+path,{method,credentials:'same-origin',signal:AbortSignal.timeout(30000),headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});}
+    catch{const failure=Error('No se pudo conectar con el servidor.');failure.offline=true;throw failure;}
+    let data={};try{data=await r.json();}catch{}
+    if(!r.ok){const failure=Error(data.error||'No se pudo completar la operación.');failure.status=r.status;throw failure;}
+    return data;
+  }
+  const labels={'receipts':'Recepción de mercancía','issues':'Salida PEPS','transfers':'Transferencia','waste':'Merma','counts':'Conteo físico','returns':'Devolución','purchases':'Compra a proveedor','requests':'Solicitud','articles':'Artículo','inventory':'Importación de existencias','policies':'Stock mínimo','warehouses':'Almacén','partners':'Empresa','company':'Datos de la empresa'};
+  const describe=(path,method)=>(labels[path.split('/')[1]]||'Operación')+(method==='PATCH'&&path.split('/').length>2?' (actualización)':'');
+  async function enqueue(path,method,payload){
+    await idb.put({id:payload._operationId,userId:me(),method,path,body:payload,label:describe(path,method),at:Date.now()});
+    offline.queue=await idb.queue();offline.on=true;offline.notice=true;
+    return {queued:true,id:payload._operationId};
+  }
+  // Sends queued operations in order. A lost connection stops the run; a rejection is kept for review.
+  async function flush(){
+    if(offline.flushing)return;offline.flushing=true;
+    try{
+      for(const op of await idb.queue()){
+        if(op.error||op.userId!==me())continue;
+        try{await request(op.path,op.method,op.body);await idb.remove(op.id);offline.on=false;}
+        catch(e){if(e.offline){offline.on=true;break;}if(e.status===401)break;op.error=e.message;await idb.put(op).catch(()=>{});}
+      }
+    }finally{offline.flushing=false;offline.queue=await idb.queue();}
+  }
+  async function api(path,method='GET',body){
+    if(method==='GET'){
+      try{const data=await request(path,method);offline.on=false;await idb.set('get:'+path,{at:Date.now(),userId:me(),data});return data;}
+      catch(e){
+        if(!e.offline)throw e;
+        const hit=await idb.get('get:'+path);
+        if(hit&&hit.userId===me()){offline.on=true;if(path==='/snapshot')offline.syncedAt=hit.at;return hit.data;}
+        throw Error('Sin conexión y todavía no hay datos guardados en este dispositivo. Conéctate una vez para descargarlos.');
+      }
+    }
+    const payload={...(body||{}),_operationId:body?._operationId||crypto.randomUUID()};
+    if(offline.queue.length)await flush();
+    // Never jump ahead of work that is still waiting to be sent.
+    if(!offline.queue.some(op=>!op.error)){
+      try{const data=await request(path,method,payload);offline.on=false;return data;}
+      catch(e){if(!e.offline)throw e;}
+    }
+    return enqueue(path,method,payload);
+  }
+  let timer;function toast(msg){if(offline.notice){msg='Sin conexión: guardado en este dispositivo. Se enviará al reconectar.';offline.notice=false;}clearTimeout(timer);$('toast').textContent=msg;$('toast').classList.add('visible');timer=setTimeout(()=>$('toast').classList.remove('visible'),6000);}
+  const ago=t=>{const m=Math.round((Date.now()-t)/60000);return !t?'nunca':m<1?'hace un momento':m<60?`hace ${m} min`:m<1440?`hace ${Math.round(m/60)} h`:`hace ${Math.round(m/1440)} d`;};
+  function offlineBanner(){
+    const waiting=offline.queue.filter(o=>!o.error).length,rejected=offline.queue.filter(o=>o.error).length;
+    if(!offline.on&&!waiting&&!rejected)return '';
+    const text=[offline.on?`Sin conexión · datos de ${ago(offline.syncedAt)}`:'Conectado',waiting?`${waiting} operación(es) por enviar`:'',rejected?`${rejected} rechazada(s) por el servidor`:''].filter(Boolean).join(' · ');
+    return `<div class="offline-banner ${offline.on||rejected?'warn':''}" role="status"><span>${esc(text)}</span><span class="offline-actions">${button('Reintentar','sync')}${offline.queue.length?button('Ver pendientes','pending'):''}</span></div>`;
+  }
+  function pendingList(){
+    modal('Operaciones por enviar',offline.queue.length?`<div class="table-scroll">${offline.queue.map(op=>`<div class="pending-op"><strong>${esc(op.label)}</strong><span>${esc(date(op.at))}</span>${op.error?`<span class="pending-error">Rechazada: ${esc(op.error)}</span>`:'<span>Pendiente de enviar</span>'}${button(op.error?'Quitar de la lista':'Descartar','discard-op',op.id)}</div>`).join('')}</div>`:'<p>No hay operaciones pendientes.</p>');
+  }
   function totals(a,w){const batches=state.batches.filter(b=>b.articleId===a&&(!w||b.warehouseId===w));return {physical:batches.reduce((s,b)=>s+b.quantity,0),reserved:batches.reduce((s,b)=>s+b.reserved,0),available:batches.reduce((s,b)=>s+(!b.expiry||b.expiry>=day()?b.quantity-b.reserved:0),0)};}
   function branding(){const c=state.company;document.querySelector('.workspace strong').textContent=c.name;document.querySelector('.company-avatar').innerHTML=c.logo?`<img src="${esc(c.logo)}" alt="Logo de ${esc(c.name)}" style="width:100%;height:100%;object-fit:contain">`:esc(c.name.slice(0,1));document.querySelector('.brand').innerHTML=c.logo?`<img src="${esc(c.logo)}" alt="" style="width:38px;height:38px;object-fit:contain"> ${esc(c.name)}`:esc(c.name);document.querySelector('.main-wrap footer').innerHTML=`${esc(c.name)} <span>Inventario guardado en el servidor</span><strong>Tecnología JIDE NOVA CORE · Nexo</strong>`;document.title=(navigation.find(n=>n[0]===route)?.[1]||'Nexo')+' | '+c.name;}
   function render(){
@@ -24,12 +80,13 @@
     $('crumb').textContent=nav.find(n=>n[0]===route)[1];
     const stockActions=allow('almacen')?button('Recibir mercancía','receipt','',true)+' '+button('Importar existencias','import-inventory')+' '+button('Transferir','transfer')+' '+button('Conteo físico','count')+' '+button('Salida PEPS','issue'):'';
     const actions={articles:allow('compras')?button('Nuevo artículo','article','',true)+' '+button('Importar CSV','import-articles'):'',requests:allow('solicitante','compras','almacen')?button('Nueva solicitud','request','',true):'',inventory:stockActions,movements:stockActions,transfers:allow('almacen')?button('Nueva transferencia','transfer','',true):'',returns:allow('almacen')?button('Recibir de cliente','customer-return','',true)+' '+button('Devolver a proveedor','supplier-return'):'',waste:allow('almacen')?button('Registrar merma','waste','',true):'',warehouses:allow()?button('Nuevo almacén','warehouse','',true):'',partners:allow('compras')?button('Agregar empresa','partner','',true):'',purchases:allow('compras')?button('Nueva compra','purchase','',true):'',company:button('Editar nombre y logo','company','',true)};
-    let html=`<div class="page-head"><div><p class="eyebrow">ALMACENAMIENTO Y ABASTECIMIENTO</p><h1 tabindex="-1">${nav.find(n=>n[0]===route)[1]}</h1><p class="subtitle">${route==='requests'?'Del punto de venta al almacén: solicitud, reserva, despacho y recepción.':'Control de artículos, existencias y entregas por lote.'}</p></div><div class="head-actions">${actions[route]||''}${button('Actualizar','refresh')}</div></div>`;
+    let html=offlineBanner()+`<div class="page-head"><div><p class="eyebrow">ALMACENAMIENTO Y ABASTECIMIENTO</p><h1 tabindex="-1">${nav.find(n=>n[0]===route)[1]}</h1><p class="subtitle">${route==='requests'?'Del punto de venta al almacén: solicitud, reserva, despacho y recepción.':'Control de artículos, existencias y entregas por lote.'}</p></div><div class="head-actions">${actions[route]||''}${button('Actualizar','refresh')}</div></div>`;
     if(route==='overview'){
       const low=state.policies.filter(p=>totals(p.articleId,p.warehouseId).available<p.minimum),expired=state.batches.filter(b=>b.quantity>0&&b.expiry&&b.expiry<day());
       html+=`<div class="metrics">${[['Artículos',state.articles.filter(a=>a.active).length],['Almacenes',state.warehouses.length],['Solicitudes pendientes',state.requests.filter(r=>r.status==='Pendiente').length],['Alertas de stock bajo',low.length]].map(([l,n])=>`<div class="metric"><div class="metric-top">${l}</div><div class="metric-value">${n}</div></div>`).join('')}</div><section class="panel onboarding"><h2>Tu operación, paso a paso</h2><p class="subtitle">Configura almacenes y empresas → crea artículos → recibe lotes → atiende solicitudes → consulta las entregas.</p><p>PEPS selecciona primero la recepción más antigua disponible. Los lotes caducados y las reservas se excluyen del disponible.</p>${state.articles.length?'':'<p>El catálogo está vacío. Los datos ilustrativos anteriores no se han convertido en existencias reales.</p>'}</section>`;
       html+=table(['Alerta','Artículo','Almacén','Detalle'],[...low.map(p=>[pill('Stock bajo'),esc(article(p.articleId)?.name),esc(wh(p.warehouseId)),`${number(totals(p.articleId,p.warehouseId).available)} disponibles; mínimo ${number(p.minimum)} ${article(p.articleId)?.unit}`]),...expired.map(b=>[pill('Caducado'),esc(article(b.articleId)?.name),esc(wh(b.warehouseId)),`Lote ${esc(b.lot)} · ${esc(b.expiry)}`])]);
     }
+    if(route==='metrics')html+=metricsView();
     if(route==='articles')html+=table(['SKU / artículo','Tipo','Unidad','Rotación','Estado','Acciones'],state.articles.map(a=>[`${esc(a.sku)}<br><strong>${esc(a.name)}</strong>`,esc(a.kind),esc(a.unit),'PEPS',pill(a.active?'Activo':'Desactivado'),allow('compras')?button('Editar','edit-article',a.id):'—']));
     if(route==='inventory'){
       const rows=state.articles.flatMap(a=>state.warehouses.map(w=>({a,w,...totals(a.id,w.id),policy:state.policies.find(p=>p.articleId===a.id&&p.warehouseId===w.id)}))).filter(x=>(!warehouse||x.w.id===warehouse)&&`${x.a.sku} ${x.a.name}`.toLowerCase().includes(query.toLowerCase()));
@@ -49,8 +106,39 @@
     $('main').innerHTML=html;window.nexoAuth?.decorate();branding();
     $('search')?.addEventListener('input',e=>{query=e.target.value;page=0;const pos=e.target.selectionStart;render();$('search').focus();$('search').setSelectionRange(pos,pos);});
     $('warehouse-filter')?.addEventListener('change',e=>{warehouse=e.target.value;page=0;render();});
+    $('metrics-period')?.addEventListener('change',e=>{metricsMonths=Number(e.target.value);metricsError='';render();});
   }
-  async function refresh(){const version=++loadVersion;try{const next=await api('/snapshot');if(version!==loadVersion)return;state=next;render();}catch(e){if(state)toast(e.message);else $('main').innerHTML=`<section class="panel onboarding"><h1>No se pudo cargar el inventario</h1><p>${esc(e.message)}</p>${button('Reintentar','refresh')}</section>`;}}
+  const money=(v,compact=false)=>new Intl.NumberFormat('es-MX',{style:'currency',currency:'MXN',...(compact?{notation:'compact',maximumFractionDigits:1}:{maximumFractionDigits:2})}).format(v);
+  const monthName=key=>new Date(key+'-15T12:00:00Z').toLocaleDateString('es-MX',{month:'short',year:'2-digit',timeZone:'UTC'}).replace(' ',' ');
+  const times=v=>v==null?'—':new Intl.NumberFormat('es-MX',{maximumFractionDigits:2}).format(v)+'×';
+  async function loadMetrics(){const version=++metricsVersion;try{const data=await api('/metrics/'+metricsMonths);if(version!==metricsVersion)return;metricsData=data;metricsError='';}catch(e){if(version!==metricsVersion)return;metricsError=e.message;}if(route==='metrics')render();}
+  function niceMax(v){if(v<=0)return 1;const p=10**Math.floor(Math.log10(v)),n=v/p;return(n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p;}
+  // Single-series column chart; the monthly table below carries every exact value.
+  function columns(title,note,points,format,axisFormat=format){
+    const top=niceMax(Math.max(0,...points.map(p=>p.value))),ticks=[0,.25,.5,.75,1].map(f=>top*f),last=points.length-1;
+    return `<section class="panel mchart-panel"><div class="panel-head"><div><h2>${esc(title)}</h2><p>${esc(note)}</p></div></div><div class="mchart${points.length>6?' dense':''}" role="img" aria-label="${esc(title+': '+points.map(p=>p.label+' '+format(p.value)).join(', '))}"><div class="mchart-axis" aria-hidden="true">${ticks.slice().reverse().map(t=>`<span>${esc(axisFormat(t))}</span>`).join('')}</div><div class="mchart-plot">${ticks.slice(1).map(t=>`<i class="mchart-grid" style="bottom:${t/top*100}%"></i>`).join('')}${points.map((p,i)=>`<div class="mchart-col" tabindex="0" aria-label="${esc(p.label+': '+format(p.value))}" data-tip="${esc(p.label+' · '+format(p.value))}"><span class="mchart-bar" style="height:${p.value>0?Math.max(1,p.value/top*100):0}%">${i===last?`<b>${esc(format(p.value))}</b>`:''}</span><small aria-hidden="true">${esc(p.label)}</small></div>`).join('')}</div></div></section>`;
+  }
+  function metricsView(){
+    const period=`<div class="toolbar metrics-toolbar"><label class="field inline">Periodo<select id="metrics-period" class="filter">${[3,6,12].map(n=>`<option value="${n}" ${n===metricsMonths?'selected':''}>Últimos ${n} meses</option>`).join('')}</select></label></div>`;
+    if(metricsError&&(!metricsData||metricsData.months!==metricsMonths))return period+`<section class="panel onboarding"><h2>No se pudieron calcular los indicadores</h2><p>${esc(metricsError)}</p>${button('Reintentar','metrics-retry')}</section>`;
+    if(!metricsData||metricsData.months!==metricsMonths){loadMetrics();return period+'<section class="panel empty" role="status">Calculando indicadores…</section>';}
+    const m=metricsData,costed=m.costCoverage.valued>0,pts=(key,fn=x=>x[key])=>m.monthly.map(x=>({label:monthName(x.month),value:fn(x)}));
+    const count=v=>new Intl.NumberFormat('es-MX').format(v);
+    const coverage=m.costCoverage.total?`${m.costCoverage.valued} de ${m.costCoverage.total} lotes con costo`:'Sin existencias';
+    const tile=(label,value,note)=>`<div class="metric"><div class="metric-top">${esc(label)}</div><div class="metric-value">${value}</div><div class="metric-note">${esc(note)}</div></div>`;
+    let html=period+`<div class="metrics">${tile('Valor del inventario',costed?esc(money(m.inventoryValue)):'Sin costos',costed?coverage:'Registra el costo unitario al recibir mercancía')}${tile('Movimientos en el periodo',count(m.totals.movements),'Entradas, salidas, mermas, ajustes y transferencias')}${tile('Mermas en el periodo',count(m.totals.waste),costed?'Valor: '+money(m.totals.wasteValue):'Registros de merma')}${tile('Rotación del periodo',costed?times(m.totals.rotation):'—',costed?'Costo de salidas ÷ inventario promedio':'Requiere costos; consulta la rotación por artículo')}</div>`;
+    if(costed&&m.costCoverage.valued<m.costCoverage.total)html+=`<p class="note">Hay lotes sin costo unitario: su valor cuenta como $0. Los lotes nuevos toman el costo capturado en la recepción.</p>`;
+    html+=`<div class="mchart-layout">`+columns('Movimientos por mes','Registros que cambian existencias',pts('movements',x=>x.movements.total),count);
+    html+=costed?columns('Valor del inventario al cierre','Existencias valuadas a costo de recepción',pts('closingValue'),v=>money(v),v=>money(v,true)):'';
+    html+=costed?columns('Mermas por mes','Valor a costo de las mermas registradas',pts('wasteValue'),v=>money(v),v=>money(v,true)):columns('Mermas por mes','Número de registros de merma',pts('waste',x=>x.movements.waste),count);
+    html+=costed?columns('Rotación mensual','Veces que se renueva el inventario en el mes',pts('rotation',x=>x.rotation||0),v=>times(v),v=>new Intl.NumberFormat('es-MX',{maximumFractionDigits:2}).format(v)):'';
+    html+=`</div><h2 class="section-title">Detalle por mes</h2>`;
+    html+=table(['Mes','Entradas','Salidas','Mermas','Transferencias','Ajustes','Dev. a proveedor',...(costed?['Valor de salidas','Valor de mermas','Valor al cierre','Rotación']:[])],m.monthly.slice().reverse().map(x=>[esc(monthName(x.month)),count(x.movements.entries),count(x.movements.exits),count(x.movements.waste),count(x.movements.transfers),count(x.movements.adjustments),count(x.movements.supplierReturns),...(costed?[money(x.exitValue),money(x.wasteValue),money(x.closingValue),times(x.rotation)]:[])]));
+    html+=`<h2 class="section-title">Rotación por artículo</h2><p class="note">Rotación = unidades que salieron en el periodo ÷ existencia promedio. Cobertura = días que alcanza la existencia actual al ritmo de salida del periodo.</p>`;
+    html+=table(['SKU / artículo','Existencia','Salidas','Existencia promedio','Rotación','Cobertura','Mermas',...(costed?['Valor en existencia']:[])],m.articles.map(a=>[`${esc(a.sku)}<br><strong>${esc(a.name)}</strong>`,`${number(a.stock)} ${esc(a.unit)}`,`${number(a.exits)} ${esc(a.unit)}`,`${number(Math.round(a.averageStock/100)*100)} ${esc(a.unit)}`,times(a.rotation),a.coverageDays==null?'Sin salidas':count(a.coverageDays)+' días',`${number(a.waste)} ${esc(a.unit)}`,...(costed?[a.valued?money(a.stockValue):'Sin costo']:[])]));
+    return html;
+  }
+  async function refresh(){const version=++loadVersion;try{if(!offline.loaded){offline.queue=await idb.queue();offline.loaded=true;}if(offline.queue.length)await flush();const next=await api('/snapshot');if(version!==loadVersion)return;state=next;metricsData=null;metricsError='';render();}catch(e){if(state)toast(e.message);else $('main').innerHTML=`<section class="panel onboarding"><h1>No se pudo cargar el inventario</h1><p>${esc(e.message)}</p>${button('Reintentar','refresh')}</section>`;}}
   const field=(label,name,type='text',value='',extra='')=>`<label class="field">${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra} required></label>`;
   const select=(label,name,options)=>`<label class="field">${label}<select name="${name}" required>${options.map(([id,label])=>`<option value="${esc(id)}">${esc(label)}</option>`).join('')}</select></label>`;
   const articles=()=>select('Artículo','articleId',state.articles.filter(a=>a.active).map(a=>[a.id,`${a.sku} · ${a.name} (${a.unit})`]));
@@ -96,7 +184,7 @@
   }
   function receipt(purchase){
     const pending=purchase?purchaseItems(purchase).filter(item=>item.received<item.quantity):[],articleField=purchase?select('Artículo pendiente','articleId',pending.map(item=>[item.articleId,`${article(item.articleId)?.sku} · ${article(item.articleId)?.name} · pendiente ${number(item.quantity-item.received)} ${article(item.articleId)?.unit}`])):articles(),partnerField=purchase?`<input type="hidden" name="partnerId" value="${esc(purchase.partnerId)}"><p class="note">Proveedor: ${esc(partner(purchase.partnerId))}</p>`:partners('Proveedor');
-    form('Recepción de mercancía',articleField+warehouses()+partnerField+field('Número de lote','lot')+qty()+`<label class="field">Caducidad (opcional)<input type="date" name="expiry" min="${day()}"></label>`+field('Documento de recepción','reference'),'/receipts','POST',purchase?{purchaseId:purchase.id,reference:purchase.reference}:{});
+    form('Recepción de mercancía',articleField+warehouses()+partnerField+field('Número de lote','lot')+qty()+`<label class="field">Caducidad (opcional)<input type="date" name="expiry" min="${day()}"></label>`+`<label class="field">Costo unitario en MXN (opcional)<input type="number" name="unitCost" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></label>`+field('Documento de recepción','reference'),'/receipts','POST',purchase?{purchaseId:purchase.id,reference:purchase.reference}:{});
     if(purchase){const f=$('ops-form'),articleSelect=f.elements.namedItem('articleId'),quantity=f.elements.namedItem('quantity'),sync=()=>{const item=pending.find(x=>x.articleId===articleSelect.value);if(item)quantity.value=(item.quantity-item.received)/1000;};articleSelect.addEventListener('change',sync);sync();}
   }
   function physicalCount(){
@@ -123,17 +211,17 @@
     return clean.map((row,i)=>{const kind=kinds[normalized(row[indexes.kind])],unit=units[normalized(row[indexes.unit])];if(!kind||!unit)throw Error(`Tipo o unidad inválido en la fila ${i+2}.`);return{sku:String(row[indexes.sku]??'').trim(),name:String(row[indexes.name]??'').trim(),kind,unit};});
   }
   function parseInventoryCSV(text){
-    const {rows,headers}=csvTable(text),column=names=>headers.findIndex(h=>names.includes(h)),indexes={sku:column(['sku','codigo']),warehouse:column(['almacen','bodega']),supplier:column(['proveedor']),lot:column(['lote']),quantity:column(['cantidad']),expiry:column(['caducidad','vencimiento']),reference:column(['referencia','documento'])};
+    const {rows,headers}=csvTable(text),column=names=>headers.findIndex(h=>names.includes(h)),indexes={sku:column(['sku','codigo']),warehouse:column(['almacen','bodega']),supplier:column(['proveedor']),lot:column(['lote']),quantity:column(['cantidad']),expiry:column(['caducidad','vencimiento']),reference:column(['referencia','documento'])},costColumn=column(['costo','costo unitario','costo_unitario']);
     if(Object.values(indexes).some(i=>i<0))throw Error('El encabezado debe incluir SKU, Almacén, Proveedor, Lote, Cantidad, Caducidad y Referencia.');if(!rows.length)throw Error('El archivo no contiene existencias.');if(rows.length>100)throw Error('Solo se permiten 100 existencias por archivo.');
     const unique=(values,label,row)=>{if(values.length!==1)throw Error(`${label} no encontrado o ambiguo en la fila ${row}.`);return values[0];};
-    return rows.map((row,i)=>{const line=i+2,sku=String(row[indexes.sku]??'').trim().toUpperCase(),warehouseName=normalized(row[indexes.warehouse]),supplierName=normalized(row[indexes.supplier]),a=unique(state.articles.filter(x=>x.sku===sku),'SKU',line),w=unique(state.warehouses.filter(x=>normalized(x.name)===warehouseName),'Almacén',line),p=unique(state.partners.filter(x=>x.kind==='Proveedor'&&normalized(x.name)===supplierName),'Proveedor',line);return{articleId:a.id,warehouseId:w.id,partnerId:p.id,lot:String(row[indexes.lot]??'').trim(),quantity:String(row[indexes.quantity]??'').trim(),expiry:String(row[indexes.expiry]??'').trim(),reference:String(row[indexes.reference]??'').trim()};});
+    return rows.map((row,i)=>{const line=i+2,sku=String(row[indexes.sku]??'').trim().toUpperCase(),warehouseName=normalized(row[indexes.warehouse]),supplierName=normalized(row[indexes.supplier]),a=unique(state.articles.filter(x=>x.sku===sku),'SKU',line),w=unique(state.warehouses.filter(x=>normalized(x.name)===warehouseName),'Almacén',line),p=unique(state.partners.filter(x=>x.kind==='Proveedor'&&normalized(x.name)===supplierName),'Proveedor',line);return{articleId:a.id,warehouseId:w.id,partnerId:p.id,lot:String(row[indexes.lot]??'').trim(),quantity:String(row[indexes.quantity]??'').trim(),expiry:String(row[indexes.expiry]??'').trim(),reference:String(row[indexes.reference]??'').trim(),unitCost:costColumn<0?'':String(row[costColumn]??'').trim().replace(/^\$/,'').replace(/,/g,'')};});
   }
   function importArticles(){
     modal('Importar artículos desde CSV','<form id="import-form" class="auth-form"><label class="field">Archivo CSV<input type="file" name="file" accept=".csv,text/csv" required></label><p class="note">Columnas requeridas: SKU, Nombre, Tipo y Unidad. Tipos: Mercancía, Insumo o Producto terminado. Unidades: pzas, kg o L. Máximo 200 filas.</p><p id="import-error" class="auth-message" role="alert" hidden></p><div class="modal-actions">'+button('Cancelar','close')+'<button class="button primary" type="submit">Importar</button></div></form>');
     const f=$('import-form'),operationId=crypto.randomUUID();f.onsubmit=async e=>{e.preventDefault();const submit=f.querySelector('[type="submit"]'),error=$('import-error'),file=f.elements.namedItem('file').files[0];submit.disabled=true;error.hidden=true;try{if(file.size>1024*1024)throw Error('El archivo CSV no puede superar 1 MB.');const rows=parseCSV(await file.text()),result=await api('/articles/import','POST',{_operationId:operationId,rows});$('modal').close();await refresh();toast(`${result.count} artículos importados correctamente.`);}catch(ex){error.textContent=ex.message;error.hidden=false;}finally{submit.disabled=false;}};
   }
   function importInventory(){
-    modal('Importar existencias iniciales','<form id="inventory-import-form" class="auth-form"><label class="field">Archivo CSV<input type="file" name="file" accept=".csv,text/csv" required></label><p class="note">Columnas: SKU, Almacén, Proveedor, Lote, Cantidad, Caducidad y Referencia. Los nombres deben coincidir con el catálogo. Caducidad puede quedar vacía. Máximo 100 filas.</p><p id="inventory-import-error" class="auth-message" role="alert" hidden></p><div class="modal-actions">'+button('Cancelar','close')+'<button class="button primary" type="submit">Importar existencias</button></div></form>');
+    modal('Importar existencias iniciales','<form id="inventory-import-form" class="auth-form"><label class="field">Archivo CSV<input type="file" name="file" accept=".csv,text/csv" required></label><p class="note">Columnas: SKU, Almacén, Proveedor, Lote, Cantidad, Caducidad y Referencia; Costo (unitario, MXN) es opcional. Los nombres deben coincidir con el catálogo. Caducidad y Costo pueden quedar vacíos. Máximo 100 filas.</p><p id="inventory-import-error" class="auth-message" role="alert" hidden></p><div class="modal-actions">'+button('Cancelar','close')+'<button class="button primary" type="submit">Importar existencias</button></div></form>');
     const f=$('inventory-import-form'),operationId=crypto.randomUUID();f.onsubmit=async e=>{e.preventDefault();const submit=f.querySelector('[type="submit"]'),error=$('inventory-import-error'),file=f.elements.namedItem('file').files[0];submit.disabled=true;error.hidden=true;try{if(file.size>1024*1024)throw Error('El archivo CSV no puede superar 1 MB.');const rows=parseInventoryCSV(await file.text()),result=await api('/inventory/import','POST',{_operationId:operationId,rows});$('modal').close();await refresh();toast(`${result.count} existencias importadas correctamente.`);}catch(ex){error.textContent=ex.message;error.hidden=false;}finally{submit.disabled=false;}};
   }
   function requestForm(){
@@ -158,7 +246,7 @@
   function exportCSV(){const rows=[['SKU','Artículo','Almacén','Físico','Reservado','Disponible','Unidad'],...state.articles.filter(a=>`${a.sku} ${a.name}`.toLowerCase().includes(query.toLowerCase())).flatMap(a=>state.warehouses.filter(w=>!warehouse||w.id===warehouse).map(w=>{const t=totals(a.id,w.id);return[a.sku,a.name,w.name,t.physical/1000,t.reserved/1000,t.available/1000,a.unit];}))];const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/^[=+@-]/,"'$&").replaceAll('"','""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='inventario-'+day()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   document.addEventListener('click',async e=>{const b=e.target.closest('[data-op]');if(!b)return;const op=b.dataset.op,id=b.dataset.id;
     try{
-      if(op==='close')return $('modal').close();if(op==='refresh')return refresh();if(op==='next'||op==='previous'){page+=op==='next'?1:-1;return render();}if(op==='export')return exportCSV();
+      if(op==='close')return $('modal').close();if(op==='refresh')return refresh();if(op==='sync')return refresh();if(op==='pending')return pendingList();if(op==='discard-op'){await idb.remove(id);offline.queue=await idb.queue();$('modal').close();render();return;}if(op==='metrics-retry'){metricsData=null;metricsError='';return render();}if(op==='next'||op==='previous'){page+=op==='next'?1:-1;return render();}if(op==='export')return exportCSV();
       if(op==='article')form('Nuevo artículo',field('SKU','sku')+field('Nombre','name')+select('Tipo','kind',[['Mercancía','Mercancía'],['Insumo','Insumo'],['Producto terminado','Producto terminado']])+select('Unidad base','unit',[['pzas','Piezas · enteros'],['kg','Kilogramos · hasta 3 decimales'],['L','Litros · hasta 3 decimales']]),'/articles');
       if(op==='import-articles')importArticles();
       if(op==='import-inventory')importInventory();
@@ -189,5 +277,9 @@
   document.querySelector('.skip-link').onclick=e=>{e.preventDefault();$('main').focus();};
   sidebar.addEventListener('keydown',e=>{if(e.key!=='Tab'||!sidebar.classList.contains('open'))return;const items=[...sidebar.querySelectorAll('a[href],button:not([disabled])')].filter(n=>n.getClientRects().length),first=items[0],last=items.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}});
   function navigate(event){route=location.hash.slice(1)||'overview';page=0;menu(false);if(state)render();else refresh();if(event){$('main').querySelector('h1')?.focus();window.scrollTo(0,0);}}
-  window.addEventListener('hashchange',navigate);navigate();
+  window.addEventListener('hashchange',navigate);
+  addEventListener('online',()=>refresh());
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(offline.on||offline.queue.length))refresh();});
+  setInterval(()=>{if(offline.on||offline.queue.length)refresh();},30000);
+  navigate();
 })();

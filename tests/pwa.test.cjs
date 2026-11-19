@@ -37,9 +37,28 @@ test('web app is installable: manifest, icons, worker and offline page are serve
   assert.match(dist('auth.js'), /serviceWorker\.register\('\/sw\.js'\)/);
 });
 
-test('service worker never caches inventory data or the protected bundle', () => {
+test('service worker caches the shell and the signed-in bundle, never API data', () => {
   const worker = dist('sw.js');
-  assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\) \|\| url\.pathname === '\/app\.js'\) return;/);
+  assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)\) return;/);
   const shell = JSON.parse(worker.match(/const SHELL = (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+  assert.ok(shell.includes('/'));
   assert.ok(!shell.some(file => file.startsWith('/api/') || file === '/app.js'));
+  // The bundle is stored only from a successful (so authenticated) answer, and dropped
+  // when the server refuses the session or the user signs out.
+  assert.match(worker, /if \(response\.ok\) event\.waitUntil\(put\('\/app\.js'/);
+  assert.match(worker, /response\.status === 401 \|\| response\.status === 403/);
+  assert.match(worker, /event\.data === 'forget'/);
+  assert.match(worker, /event\.data === 'warm'/);
+});
+
+test('offline support keeps data in this browser only and erases it on sign-out', () => {
+  const auth = dist('auth.js'), app = dist('app.js');
+  assert.match(auth, /indexedDB\.open\('nexo-offline'/);
+  assert.match(auth, /await idb\.clear\(\)/);
+  assert.match(auth, /postMessage\('forget'\)/);
+  assert.match(auth, /Si cierras sesión se perderán/);
+  // Cached data is only used for the user who downloaded it, and writes carry an idempotency key.
+  assert.match(app, /hit\.userId===me\(\)/);
+  assert.match(app, /_operationId:body\?\._operationId\|\|crypto\.randomUUID\(\)/);
+  assert.doesNotMatch(app, /localStorage/);
 });

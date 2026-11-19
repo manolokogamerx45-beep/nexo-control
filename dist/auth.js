@@ -9,11 +9,41 @@
   const initials = name => name.split(/\s+/).slice(0,2).map(n=>n[0]||'').join('').toUpperCase();
   const avatarContent = user => user.picture ? '<img class="profile-photo" src="'+escape(user.picture)+'" alt="Foto de '+escape(user.name)+'" referrerpolicy="no-referrer">' : escape(initials(user.name));
   function photoFallbacks(root=document){root.querySelectorAll('.profile-photo').forEach(img=>{img.onerror=()=>{img.parentElement.textContent=initials(currentUser.name);};});}
+  // Offline support: the last synchronised data and any unsent operations live in IndexedDB,
+  // only in this browser, and are erased when the user signs out.
+  const idb = (() => {
+    const open = () => new Promise((resolve, reject) => {
+      const request = indexedDB.open('nexo-offline', 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore('kv'); request.result.createObjectStore('queue', { keyPath: 'id' }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const run = async (store, mode, action) => {
+      const db = await open();
+      try {
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction(store, mode), request = action(tx.objectStore(store));
+          tx.oncomplete = () => resolve(request.result);
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+      } finally { db.close(); }
+    };
+    return {
+      get: key => run('kv', 'readonly', s => s.get(key)).catch(() => undefined),
+      set: (key, value) => run('kv', 'readwrite', s => s.put(value, key)).catch(() => {}),
+      queue: () => run('queue', 'readonly', s => s.getAll()).then(rows => rows.sort((a, b) => a.at - b.at)).catch(() => []),
+      put: op => run('queue', 'readwrite', s => s.put(op)),
+      remove: id => run('queue', 'readwrite', s => s.delete(id)).catch(() => {}),
+      clearData: () => run('kv', 'readwrite', s => s.clear()).catch(() => {}),
+      clear: async () => { await run('kv', 'readwrite', s => s.clear()).catch(() => {}); await run('queue', 'readwrite', s => s.clear()).catch(() => {}); }
+    };
+  })();
+  const cachedUser = () => { try { return JSON.parse(localStorage.getItem('nexo.user')); } catch { return null; } };
   let currentUser = null, authConfig = null, activeTab = 'profile';
   async function api(path,options={}) {
     let response;
     try { response=await fetch('/api/v1'+path,{credentials:'same-origin',signal:AbortSignal.timeout(15000),...options,headers:{'Content-Type':'application/json',Accept:'application/json',...options.headers}}); }
-    catch { throw new Error('No se pudo conectar con el servidor. Intenta de nuevo en unos segundos.'); }
+    catch { const failure = new Error('No se pudo conectar con el servidor. Intenta de nuevo en unos segundos.'); failure.offline = true; throw failure; }
     const contentType=response.headers.get('content-type')||'';
     if(!contentType.includes('application/json'))throw new Error('El acceso requiere el servidor de JIDE NOVA CORE. Abre la aplicación desde su servidor, no como archivo estático.');
     const result=await response.json();
@@ -53,19 +83,29 @@
       }catch(error){message(error.message);}finally{button.disabled=false;}
     };
   }
-  async function logout(){try{await api('/auth/logout',{method:'POST',body:'{}'});location.replace('/');}catch(error){message(error.message,false,'profile-message');}}
+  async function logout(){
+    const unsent=(await idb.queue()).length;
+    if(unsent&&!confirm(`Tienes ${unsent} operación(es) sin enviar. Si cierras sesión se perderán. ¿Cerrar sesión de todos modos?`))return;
+    try{await api('/auth/logout',{method:'POST',body:'{}'});}
+    catch(error){if(!error.offline){message(error.message,false,'profile-message');return;}}
+    await idb.clear();try{localStorage.removeItem('nexo.user');}catch{}
+    navigator.serviceWorker?.controller?.postMessage('forget');
+    location.replace('/');
+  }
   function pending() {
     authShell(`<p class="eyebrow">TU CUENTA ESTÁ REGISTRADA</p><h2>Hola, ${escape(currentUser.name.split(' ')[0])}</h2><p>Tu solicitud está pendiente de aprobación.</p><div class="access-box"><p>Un administrador de JIDE NOVA CORE debe verificar tu identidad y asignarte un perfil antes de que puedas acceder a la operación.</p></div><p class="profile-email">${escape(currentUser.email)}</p><div id="auth-message" hidden role="status"></div><button class="auth-submit" id="check-access">Comprobar mi acceso</button><div class="auth-switch"><button id="pending-logout">Cerrar sesión</button></div>`);
     $('pending-logout').onclick=logout;
     $('check-access').onclick=async()=>{try{currentUser=(await api('/me')).user;if(currentUser.status==='active')await enter();else message('Tu solicitud sigue pendiente de aprobación.',true);}catch(error){if(error.status===401){login();message('Tu acceso cambió. Inicia sesión de nuevo.');}else message(error.message);}};
   }
   async function enter() {
+    try{localStorage.setItem('nexo.user',JSON.stringify(currentUser));}catch{}
     if(currentUser.status!=='active'){pending();return;}
     $('auth-root').hidden=true;document.querySelector('.shell').hidden=false;document.querySelector('.skip-link').hidden=false;
     if(!document.querySelector('script[data-operational]')) {
       await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/app.js';script.dataset.operational='true';script.onload=resolve;script.onerror=()=>{script.remove();reject(new Error('No se pudo abrir la aplicación. Inicia sesión de nuevo.'));};document.body.append(script);});
     }
     decorate();
+    navigator.serviceWorker?.ready.then(registration => registration.active?.postMessage('warm')).catch(() => {});
   }
   function can(action){return currentUser?.status==='active'&&(currentUser.role==='administrador'||action==='export'||(['movement','waste'].includes(action)&&currentUser.role==='almacen')||(action==='purchase'&&currentUser.role==='compras'));}
   function decorate() {
@@ -112,15 +152,15 @@
     }
   }
   async function openProfile(){document.dispatchEvent(new Event('nexo:close-navigation'));const d=$('profile-dialog');await profileBody('profile');if(!d.open)d.showModal();$('close-profile').focus();}
-  window.nexoAuth={decorate,can};
+  window.nexoOffline=idb;window.nexoAuth={decorate,can,user:()=>currentUser};
   document.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(button&&!can(button.dataset.action)){e.preventDefault();e.stopImmediatePropagation();}},true);
   async function boot() {
     try {
-      authConfig=await api('/auth/config');
+      try{authConfig=await api('/auth/config');}catch(error){if(!error.offline||!cachedUser())throw error;authConfig={googleEnabled:false,registrationEnabled:false,company:{name:'Mi empresa',logo:''}};}
       const errors={service_unavailable:'No se pudo conectar con Firebase. Contacta al administrador para revisar la conexión del servidor.',too_many_attempts:'Demasiados intentos. Espera unos minutos antes de volver a intentar.',google_unavailable:'El acceso con Google aún no está configurado.',google_failed:'No se pudo verificar el acceso con Google. Intenta de nuevo.',google_cancelled:'Se canceló el acceso con Google.',account_exists:'Ya existe una cuenta con ese correo. Accede con tu contraseña; no se vinculó automáticamente a Google.',account_disabled:'Esta cuenta está desactivada. Contacta al administrador.'};
       const code=new URLSearchParams(location.search).get('auth_error');
       if(code){history.replaceState(null,'','/');login();message(errors[code]||'No se pudo iniciar sesión.');return;}
-      try{currentUser=(await api('/me')).user;await enter();}catch(error){if(error.status===401)login();else if(error.status===503){login();message(error.message);}else throw error;}
+      try{currentUser=(await api('/me')).user;await enter();}catch(error){if(error.offline&&cachedUser()){currentUser=cachedUser();await enter();}else if(error.status===401){try{localStorage.removeItem('nexo.user');}catch{}await idb.clearData();login();}else if(error.status===503){login();message(error.message);}else throw error;}
     }catch(error){authShell(`<h2>No se pudo conectar</h2><p>${escape(error.message)}</p><button id="auth-retry" class="auth-submit">Reintentar</button>`);$('auth-retry').onclick=()=>location.reload();}
   }
   boot();

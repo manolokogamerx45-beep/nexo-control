@@ -16,9 +16,46 @@ Consulta [alcance operativo y guía de prueba](docs/inventory-workflow.md).
 | --- | --- | --- |
 | Acceso | Google y contraseña, registro sujeto a aprobación | Google mediante navegador, contraseña y recuperación de sesión |
 | Perfil y permisos | Edición del perfil, administración de usuarios y aprobaciones | Edición del perfil y pantalla de aprobación pendiente; respeta el rol recibido de la API |
-| Inventario | Catálogo editable, inventario persistente, mínimos y PEPS | Inventario real de solo lectura: búsqueda por artículo/SKU/lote, filtros, stock bajo y detalle; movimientos de prueba solo en modo visitante |
+| Inventario | Catálogo editable, inventario persistente, mínimos y PEPS | Las mismas operaciones que la web: recepciones, salidas PEPS, transferencias, conteos, mermas, devoluciones, compras, solicitudes, catálogo, importación CSV y administración de usuarios |
 | Consultas | Resumen calculado, trazabilidad, solicitudes y compras separadas | Lotes, movimientos, mermas, compras y proveedores desde la API; navegación para teléfono/tableta |
+| Indicadores | Historial de 3, 6 o 12 meses: movimientos por mes, valor del inventario al cierre, mermas, rotación mensual y por artículo con días de cobertura (`GET /api/v1/operations/metrics/{3\|6\|12}`) | Misma pantalla de Indicadores, con gráficas que se adaptan al ancho |
 | Interfaz | Tablas adaptables, menú móvil, navegación por teclado y mejoras de contraste | Material 3 en español, formularios desplazables y navegación adaptable |
+
+### Funcionamiento sin internet
+
+Web y app móvil funcionan igual sin conexión, con el mismo criterio:
+
+- **Lectura:** se muestra la última copia descargada, con un aviso "Sin conexión · datos de hace N min". En la web la guarda IndexedDB (solo en ese navegador); en el teléfono, el almacenamiento cifrado del sistema (Keystore/Keychain).
+- **Escritura:** lo que registres sin conexión se guarda en una cola local y se envía en orden al reconectar (automáticamente, al volver a abrir la app o con **Reintentar**). Cada operación lleva un identificador único, así que el servidor la aplica una sola vez aunque se reenvíe.
+- **Validación local:** unidades, cantidades, existencias disponibles y caducidades se validan en el dispositivo; si el servidor rechaza algo después (por ejemplo, otra persona vació el lote), la operación queda marcada como rechazada y puedes revisarla.
+- **Límites:** las existencias mostradas no incluyen lo que está en la cola hasta que se envía; lo creado sin conexión (un almacén nuevo, por ejemplo) no se puede usar en otra operación hasta sincronizar; el administrador de usuarios y el logo de la empresa necesitan conexión.
+- **Privacidad:** al cerrar sesión se borran la copia local y la cola (la app avisa si hay operaciones sin enviar). Un teléfono o navegador compartido nunca mezcla cuentas: la copia pertenece al usuario que la descargó.
+
+### Indicadores con historial
+
+La sección **Indicadores** reconstruye las existencias al cierre de cada mes (hora de Ciudad de México) a partir del registro de movimientos, así que también cubre los meses anteriores a esta función. El valor del inventario, el valor de las mermas y la rotación mensual se calculan con el **costo unitario** del lote. Ese costo es opcional: se captura al recibir mercancía o en la columna `Costo` del CSV de existencias, y las transferencias y devoluciones de clientes lo heredan del lote de origen. Los lotes registrados antes de este cambio no tienen costo y valen $0 hasta que se registren de nuevo; la pantalla indica cuántos lotes tienen costo. La rotación por artículo usa unidades y funciona aunque no haya costos. El perfil Solicitante no tiene acceso.
+
+## Publicar en Vercel
+
+El repositorio incluye `vercel.json` y `api/index.js`: Vercel ejecuta el mismo servidor que `npm start` como una función, y la web sigue siendo instalable como PWA porque Vercel sirve todo por HTTPS.
+
+1. **Cuenta de servicio de Firestore.** En Firebase Console → Configuración del proyecto → Cuentas de servicio → *Generar nueva clave privada*. Guarda el JSON fuera del repositorio. La cuenta necesita el rol *Cloud Datastore User*.
+2. **Proyecto en Vercel** (plan Hobby, gratuito para uso personal y escolar). Importa el repositorio de GitHub y deja la configuración que trae `vercel.json`.
+3. **Variables de entorno** en Vercel → Settings → Environment Variables (entorno *Production*):
+
+   | Variable | Valor |
+   | --- | --- |
+   | `NODE_ENV` | `production` |
+   | `APP_ORIGIN` | `https://TU-PROYECTO.vercel.app` (sin barra final) |
+   | `FIREBASE_PROJECT_ID` | El ID del proyecto de Firebase |
+   | `FIRESTORE_DATABASE_ID` | `(default)` u otro nombre si lo cambiaste |
+   | `FIREBASE_SERVICE_ACCOUNT` | El contenido completo del JSON del paso 1 |
+   | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Los del cliente OAuth web |
+
+4. **Google OAuth.** En Google Cloud Console agrega `https://TU-PROYECTO.vercel.app` como origen autorizado y `https://TU-PROYECTO.vercel.app/api/v1/auth/google/callback` como URI de redirección.
+5. **Desplegar.** Cada push a `main` publica una nueva versión. Usa siempre el dominio de producción: los dominios de vista previa no coinciden con `APP_ORIGIN` y el servidor rechaza sus formularios.
+
+Para la app móvil, compila apuntando al dominio publicado: `flutter build apk --release --dart-define=API_BASE_URL=https://TU-PROYECTO.vercel.app`.
 
 ## Tecnologías utilizadas
 
