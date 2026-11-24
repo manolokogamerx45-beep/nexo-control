@@ -53,7 +53,8 @@ test('warehouse transfers move available FIFO layers and preserve lot traceabili
   const received=await req('/transfers/'+transfer.data.id,'PATCH',{action:'receive'},'almacen');assert.equal(received.status,200);assert.equal(received.data.status,'Recibida');
   snapshot=(await req('/snapshot')).data;const source=snapshot.batches.filter(b=>b.warehouseId===w.id),target=snapshot.batches.filter(b=>b.warehouseId===destination.id);
   assert.equal(source.reduce((n,b)=>n+b.quantity,0),6000);assert.equal(target.reduce((n,b)=>n+b.quantity,0),7000);
-  assert.deepEqual(target.map(b=>[b.lot,b.quantity]),[['FIRST',5000],['SECOND',2000]]);
+  // Firestore lists documents by id, not by creation order: compare the layers sorted by lot.
+  assert.deepEqual(target.map(b=>[b.lot,b.quantity]).sort(),[['FIRST',5000],['SECOND',2000]]);
   assert.ok(target.every(b=>b.transferId===transfer.data.id&&b.transferredFromBatchId));
   assert.equal(snapshot.events.filter(e=>e.transferId===transfer.data.id&&e.type==='Transferencia salida').length,2);
   assert.equal(snapshot.events.filter(e=>e.transferId===transfer.data.id&&e.type==='Transferencia entrada').length,2);
