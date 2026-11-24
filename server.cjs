@@ -235,7 +235,7 @@ function createApp(config = {}) {
       }
       if(route.startsWith('/api/'))A.bad('Endpoint no encontrado.',404);
       if(!['GET','HEAD'].includes(req.method))A.bad('Método no permitido.',405);
-      const allowed={'/':'index.html','/index.html':'index.html','/styles.css':'styles.css','/auth.css':'auth.css','/auth.js':'auth.js','/app.js':'app.js','/aviso-privacidad':'aviso-privacidad.html','/aviso-privacidad.html':'aviso-privacidad.html',
+      const allowed={'/':'index.html','/index.html':'index.html','/styles.css':'styles.css','/auth.css':'auth.css','/auth.js':'auth.js','/theme.js':'theme.js','/theme.css':'theme.css','/app.js':'app.js','/aviso-privacidad':'aviso-privacidad.html','/aviso-privacidad.html':'aviso-privacidad.html',
         '/manifest.webmanifest':'manifest.webmanifest','/sw.js':'sw.js','/offline.html':'offline.html','/icons/icon-192.png':'icons/icon-192.png','/icons/icon-512.png':'icons/icon-512.png','/icons/icon-maskable-512.png':'icons/icon-maskable-512.png','/icons/apple-touch-icon.png':'icons/apple-touch-icon.png'};
       if(!allowed[route])A.bad('Archivo no encontrado.',404);
       // The operational bundle is never delivered to anonymous or pending users.

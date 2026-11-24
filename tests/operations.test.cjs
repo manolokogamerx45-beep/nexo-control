@@ -205,3 +205,68 @@ test('retrying a receipt with the same operation ID records stock only once',asy
   assert.equal((await req('/receipts','POST',{...body,quantity:4})).status,409);
   const s=(await req('/snapshot')).data;assert.equal(s.batches.length,1);assert.equal(s.events.length,1);assert.equal(s.batches[0].quantity,3000);
 });
+test('articles keep an optional barcode, preferred supplier and lead time for scanning and purchase suggestions',async t=>{
+  const {req,post,a,supplier,customer}=await setup(t);
+  const created=await post('/articles',{sku:'tor-002',name:'Tornillo',kind:'Insumo',unit:'pzas',barcode:'7501234567890',preferredPartnerId:supplier.id,leadTimeDays:'12'});
+  assert.equal(created.sku,'TOR-002');assert.equal(created.barcode,'7501234567890');assert.equal(created.preferredPartnerId,supplier.id);assert.equal(created.leadTimeDays,12);
+  // Codes must stay unique against barcodes and SKUs so a scan resolves to one article.
+  assert.equal((await req('/articles','POST',{sku:'TOR-003',name:'Otro',kind:'Insumo',unit:'pzas',barcode:'7501234567890'})).status,409);
+  assert.equal((await req('/articles','POST',{sku:'TOR-004',name:'Otro',kind:'Insumo',unit:'pzas',barcode:a.sku})).status,409);
+  assert.equal((await req('/articles','POST',{sku:'TOR-005',name:'Otro',kind:'Insumo',unit:'pzas',barcode:'TOR-005'})).status,400);
+  assert.equal((await req('/articles','POST',{sku:'TOR-006',name:'Otro',kind:'Insumo',unit:'pzas',barcode:'con espacio'})).status,400);
+  assert.equal((await req('/articles','POST',{sku:'TOR-007',name:'Otro',kind:'Insumo',unit:'pzas',preferredPartnerId:customer.id})).status,400);
+  assert.equal((await req('/articles','POST',{sku:'TOR-008',name:'Otro',kind:'Insumo',unit:'pzas',leadTimeDays:'1.5'})).status,400);
+  // Older clients only send name/active: the supply fields survive that edit.
+  const renamed=await req('/articles/'+created.id,'PATCH',{name:'Tornillo hexagonal',active:true});
+  assert.equal(renamed.status,200);assert.equal(renamed.data.barcode,'7501234567890');assert.equal(renamed.data.leadTimeDays,12);
+  const cleared=await req('/articles/'+created.id,'PATCH',{name:'Tornillo hexagonal',active:true,barcode:'',preferredPartnerId:'',leadTimeDays:''});
+  assert.equal(cleared.status,200);assert.equal(cleared.data.barcode,'');assert.equal(cleared.data.preferredPartnerId,'');assert.equal(cleared.data.leadTimeDays,null);
+  assert.equal((await req('/articles/'+created.id,'PATCH',{name:'X',active:true,barcode:'1234'},'almacen')).status,403);
+});
+test('cycle count sessions freeze expected stock, need admin approval and respect movements made meanwhile',async t=>{
+  const {req,post,a,w,customer,receipt}=await setup(t);
+  const lot=await receipt('CC-1',10);
+  const opened=await req('/count-sessions','POST',{warehouseId:w.id,reference:'CC-001',blind:true},'almacen');
+  assert.equal(opened.status,200,JSON.stringify(opened.data));assert.equal(opened.data.status,'Abierto');assert.equal(opened.data.lines[0].expected,10000);
+  assert.equal((await req('/count-sessions','POST',{warehouseId:w.id,reference:'CC-002'},'almacen')).status,409);
+  const id=opened.data.id;
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'submit'},'almacen')).status,400);
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'record',lines:[{batchId:lot.id,counted:'8'}]},'almacen')).status,200);
+  // A sale happens while the count is open: 10 → 7. The count found 2 missing, so the lot ends at 5.
+  await post('/issues',{articleId:a.id,warehouseId:w.id,partnerId:customer.id,quantity:3,reference:'VTA-1'});
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'submit'},'almacen')).status,200);
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'approve'},'almacen')).status,403);
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'reopen'})).status,200);
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'submit'},'almacen')).status,200);
+  const approved=await req('/count-sessions/'+id,'PATCH',{action:'approve'});
+  assert.equal(approved.status,200);assert.equal(approved.data.status,'Aprobado');assert.equal(approved.data.adjusted,1);
+  const s=(await req('/snapshot')).data;
+  assert.equal(s.batches.find(b=>b.id===lot.id).quantity,5000);
+  const adj=s.events.find(e=>e.countSessionId===id);assert.equal(adj.type,'Ajuste negativo');assert.equal(adj.qty,2000);
+  assert.equal(s.countSessions[0].id,id);
+  assert.deepEqual((await req('/snapshot','GET',undefined,'solicitante')).data.countSessions,[]);
+  assert.equal((await req('/count-sessions/'+id,'PATCH',{action:'cancel'},'almacen')).status,409);
+});
+test('lots keep a warehouse location and articles a purchase pack',async t=>{
+  const {req,post,a,w,supplier}=await setup(t);
+  const lot=await post('/receipts',{articleId:a.id,warehouseId:w.id,partnerId:supplier.id,lot:'UB-1',quantity:4,reference:'REC-UB',location:'a-03-2'});
+  assert.equal(lot.location,'A-03-2');
+  assert.equal((await req('/batches/'+lot.id,'PATCH',{location:'B 01/4'},'almacen')).data.location,'B 01/4');
+  assert.equal((await req('/batches/'+lot.id,'PATCH',{location:'<script>'},'almacen')).status,400);
+  assert.equal((await req('/batches/'+lot.id,'PATCH',{location:'X'},'consulta')).status,403);
+  const boxed=await post('/articles',{sku:'CAJ-1',name:'Galletas',kind:'Mercancía',unit:'pzas',packName:'Caja',packSize:'12'});
+  assert.equal(boxed.packName,'Caja');assert.equal(boxed.packSize,12000);
+  const kept=await req('/articles/'+boxed.id,'PATCH',{name:'Galletas surtidas',active:true});assert.equal(kept.data.packSize,12000);
+  assert.equal((await req('/articles','POST',{sku:'CAJ-2',name:'X',kind:'Mercancía',unit:'pzas',packName:'Caja'})).status,400);
+  assert.equal((await req('/articles','POST',{sku:'CAJ-3',name:'X',kind:'Mercancía',unit:'pzas',packName:'Caja',packSize:'1'})).status,400);
+  assert.equal((await req('/articles','POST',{sku:'CAJ-4',name:'X',kind:'Mercancía',unit:'pzas',packName:'Caja',packSize:'2.5'})).status,400);
+});
+test('the audit log is visible only to administrators and describes inventory operations',async t=>{
+  const {req,post}=await setup(t);
+  await post('/warehouses',{name:'Norte',location:'Qro'});
+  assert.equal((await req('/audit','GET',undefined,'almacen')).status,403);
+  const log=await req('/audit');assert.equal(log.status,200);
+  const row=log.data.find(r=>r.action==='inventory/warehouses'&&r.details.name==='Norte');
+  assert.ok(row);assert.equal(row.actor,'administrador');assert.equal(row.details.method,'POST');
+  assert.ok(log.data.every((r,i,all)=>!i||all[i-1].at>=r.at));
+});

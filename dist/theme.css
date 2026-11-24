@@ -1,0 +1,10 @@
+/* Nexo: botón de modo claro / oscuro.
+   Los colores de ambos modos están en las variables al inicio de styles.css. */
+.theme-toggle{display:inline-grid;place-items:center;width:40px;height:40px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--control-bg);color:var(--ink);cursor:pointer;flex-shrink:0;transition:background .15s,border-color .15s,color .15s}
+.theme-toggle svg{width:19px;height:19px}
+.theme-toggle:hover{background:var(--surface-hover);border-color:var(--border-strong)}
+.theme-toggle.floating{position:fixed;top:16px;right:16px;z-index:30;box-shadow:0 4px 16px #17252022}
+:root[data-theme="dark"] .theme-toggle{color:#f3d77a}
+:root[data-theme="dark"] .theme-toggle.floating{box-shadow:0 4px 16px #0008}
+@media (prefers-reduced-motion:reduce){.theme-toggle{transition:none}}
+@media print{.theme-toggle{display:none}}

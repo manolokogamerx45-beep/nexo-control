@@ -3,8 +3,8 @@
 // session downloaded. /api/ responses are never cached here: inventory data is kept by
 // the page itself in IndexedDB and is erased when the user signs out.
 'use strict';
-const CACHE = 'nexo-shell-v2';
-const SHELL = ['/', '/styles.css', '/auth.css', '/auth.js', '/offline.html', '/manifest.webmanifest',
+const CACHE = 'nexo-shell-v6';
+const SHELL = ['/', '/styles.css', '/auth.css', '/auth.js', '/theme.css', '/theme.js', '/offline.html', '/manifest.webmanifest',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', event => {
