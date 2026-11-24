@@ -270,3 +270,15 @@ test('the audit log is visible only to administrators and describes inventory op
   assert.ok(row);assert.equal(row.actor,'administrador');assert.equal(row.details.method,'POST');
   assert.ok(log.data.every((r,i,all)=>!i||all[i-1].at>=r.at));
 });
+test('a revision mark changes with every write so clients can skip downloading an unchanged snapshot',async t=>{
+  const {req,post}=await setup(t);
+  const first=(await req('/revision','GET',undefined,'solicitante')).data.revision;
+  const snap=(await req('/snapshot')).data;assert.equal(snap.revision,first);
+  assert.equal((await req('/revision')).data.revision,first);
+  await post('/warehouses',{name:'Sur',location:'Celaya'});
+  const second=(await req('/revision')).data.revision;assert.notEqual(second,first);
+  // A rejected write leaves the mark untouched.
+  assert.equal((await req('/warehouses','POST',{name:''})).status,400);
+  assert.equal((await req('/revision')).data.revision,second);
+  assert.equal((await req('/snapshot')).data.revision,second);
+});

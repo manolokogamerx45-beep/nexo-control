@@ -758,7 +758,9 @@
   setInterval(async()=>{
     if(!state||document.hidden||offline.on||offline.queue.length||$('modal').open||document.body.classList.contains('printing'))return;
     if(['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))return;
-    try{const next=await request('/snapshot','GET');if(JSON.stringify(next)===JSON.stringify(state))return;const keepMetrics=metricsData;state=next;metricsData=keepMetrics;render();announceInbox();}catch{}
+    // Cheap check first (one document); the full inventory is downloaded only when something changed.
+    try{const {revision}=await request('/revision','GET');if(state.revision&&revision===state.revision)return;
+      const next=await request('/snapshot','GET');if(JSON.stringify(next)===JSON.stringify(state))return;const keepMetrics=metricsData;state=next;metricsData=keepMetrics;render();announceInbox();}catch{}
   },60000);
   navigate();
 })();
